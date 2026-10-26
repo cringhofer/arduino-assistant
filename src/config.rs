@@ -119,12 +119,8 @@ impl Default for AudioConfig {
 #[serde(rename_all = "lowercase")]
 pub enum FreeEngine {
     Vosk,
-    /// Moonshine: English and German (moonshine-voice) or English (sherpa-onnx).
+    /// Moonshine (moonshine-voice runtime): English and German.
     Moonshine,
-    /// whisper.cpp via whisper-rs; multilingual (German too), slower.
-    Whisper,
-    /// Whisper in pure Rust (candle-transformers); multilingual.
-    Candle,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -140,28 +136,27 @@ pub struct SttConfig {
     /// With grammar + LLM: trust the free transcript over the grammar one from this mean
     /// word confidence on (noise makes the free one garbage with ~0.7).
     pub free_trust_conf: f32,
+    /// Moonshine: if its text is no command, still run the grammar's command when the
+    /// grammar heard only known words with at least this confidence. Questions come out
+    /// with unknown words or lower confidence. Above 1 disables it.
+    pub grammar_trust_conf: f32,
     /// Main speech-to-text engine. "vosk": the grammar recognizer decides, a free Vosk
-    /// recognizer only runs for LLM questions. "moonshine" / "whisper" / "candle": that
-    /// engine transcribes every command and decides; the Vosk grammar result is the
-    /// fallback when its words agree (noise).
+    /// recognizer only runs for LLM questions. "moonshine": Moonshine transcribes every
+    /// command and decides; the Vosk grammar result is the fallback when its words agree
+    /// (noise).
     #[serde(alias = "free_engine")]
     pub engine: FreeEngine,
-    /// Moonshine model directory: a moonshine-voice model (English or German, see
-    /// scripts/get-moonshine-model.sh) or an unpacked sherpa-onnx one (English).
+    /// Moonshine model directory (English or German, see scripts/get-moonshine-model.sh).
     pub moonshine_dir: String,
-    /// sherpa-onnx models only.
-    pub moonshine_threads: i32,
-    /// libmoonshine.so of the moonshine-voice release (for moonshine-voice models).
+    /// libmoonshine.so of the moonshine-voice release.
     /// Empty: lib/moonshine/libmoonshine.so next to the program's bin directory.
     pub moonshine_lib: String,
-    /// Words to bias Moonshine towards, besides the wake word (moonshine-voice models).
+    /// Words to bias Moonshine streaming models towards, besides the wake word. Empty: the
+    /// built-in command words for German.
     pub moonshine_keyterms: Vec<String>,
-    /// whisper.cpp ggml model (multilingual, e.g. ggml-base-q5_1.bin).
-    pub whisper_model: String,
-    pub whisper_threads: i32,
-    /// Whisper engines: encode only the spoken audio, not a full 30 s window. Faster but
-    /// noticeably less accurate in tests, so off by default.
-    pub whisper_short_window: bool,
+    /// Audio from before the wake detection given to a streaming model. Less is faster;
+    /// too little cuts off commands said right after the wake word.
+    pub stream_preroll_secs: f32,
     /// Give the main engine only the audio after the wake word (Vosk word timestamps).
     /// Off until tested with real voices: with synthetic test speech it helped as often as
     /// it hurt.
@@ -169,8 +164,6 @@ pub struct SttConfig {
     /// Save every command's audio + transcripts here (WAV + TXT) to tune recognition with
     /// real voices. Empty = off.
     pub record_dir: String,
-    /// candle Whisper model directory (config*.json, tokenizer*.json, *.safetensors or *.gguf).
-    pub candle_model_dir: String,
     /// Give up if nothing is said within this many seconds after the wake word.
     pub initial_silence_secs: f32,
     /// Hard cap on a single command.
@@ -184,17 +177,14 @@ impl Default for SttConfig {
             grammar: true,
             end_silence_secs: 0.7,
             free_trust_conf: 0.9,
+            grammar_trust_conf: 0.9,
             engine: FreeEngine::Moonshine,
             moonshine_dir: "/opt/uno-assistant/models/moonshine-small-streaming-en".into(),
-            moonshine_threads: 2,
             moonshine_lib: String::new(),
             moonshine_keyterms: Vec::new(),
-            whisper_model: "/opt/uno-assistant/models/ggml-base-q5_1.bin".into(),
-            whisper_threads: 4,
-            whisper_short_window: false,
+            stream_preroll_secs: 0.8,
             record_dir: String::new(),
             cut_wake_word: false,
-            candle_model_dir: "/opt/uno-assistant/models/candle-whisper-tiny".into(),
             initial_silence_secs: 5.0,
             max_command_secs: 10.0,
         }

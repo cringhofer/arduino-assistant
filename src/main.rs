@@ -14,12 +14,6 @@ mod intents;
 mod llm;
 #[cfg(feature = "moonshine")]
 mod moonshine;
-#[cfg(feature = "moonshine-voice")]
-mod moonshine_voice;
-#[cfg(feature = "whisper")]
-mod whisper;
-#[cfg(feature = "candle")]
-mod candle_whisper;
 mod skills;
 mod speech;
 mod status;
@@ -160,7 +154,7 @@ fn main() -> Result<()> {
     log::info!("loading speech model {}", cfg.stt.model_path);
     let mut model = speech::load_model(&cfg.stt.model_path)?;
     let mut wake = speech::wake_detector(&cfg, &mut model)?;
-    // Moonshine/Whisper as main engine always run; a free Vosk recognizer only for the LLM.
+    // Moonshine as main engine always runs; a free Vosk recognizer only for the LLM.
     let second_transcriber = cfg.llm.enabled || cfg.stt.engine != config::FreeEngine::Vosk;
     let phrases = intents::grammar(cfg.language);
     let phrases: Vec<&str> = phrases.iter().map(String::as_str).collect();
@@ -291,7 +285,7 @@ fn main() -> Result<()> {
                     Heard::Text(t) => Some(t),
                 };
                 if let Some(cmd) = text {
-                    // With Moonshine/Whisper as main engine, their transcript is "what was heard".
+                    // With Moonshine as main engine, its transcript is "what was heard".
                     let main_is_free = cmd.free_kind != speech::FreeKind::Vosk;
                     let engine = format!("{:?}", cmd.free_kind).to_lowercase();
                     let (heard, heard_alt, main_name, alt_name) = if main_is_free {
@@ -317,7 +311,7 @@ fn main() -> Result<()> {
                         }
                         status.set_state(State::Thinking);
                         let t = Instant::now();
-                        let intent = choose_intent(&cmd, cfg.language, cfg.stt.free_trust_conf);
+                        let intent = choose_intent(&cmd, cfg.language, &cfg.stt);
                         status.latency(Some(turn), "intent", t.elapsed().as_secs_f32() * 1000.0);
                         log::debug!("intent: {intent:?}");
                         if !cfg.stt.record_dir.is_empty() {
@@ -519,7 +513,7 @@ fn admin_info(cfg: &Config, config_path: &std::path::Path) -> serde_json::Value 
 
 /// Grammar vs. free transcript. The grammar recognizer forces everything onto command
 /// words, so "can you recommend a good movie" can come out as "good morning".
-fn choose_intent(cmd: &speech::Command, lang: config::Lang, trust: f32) -> intents::Intent {
+fn choose_intent(cmd: &speech::Command, lang: config::Lang, stt: &config::SttConfig) -> intents::Intent {
     use intents::Intent::Unknown;
     let intent = intents::parse(&cmd.text, lang);
     let Some(free) = &cmd.free else { return intent };
@@ -528,22 +522,29 @@ fn choose_intent(cmd: &speech::Command, lang: config::Lang, trust: f32) -> inten
         // In noise Vosk's free transcript of a real command is garbage with low
         // confidence, while a clearly heard open question is confident.
         speech::FreeKind::Vosk => {
-            if grammar_ok && cmd.free_conf < trust {
+            if grammar_ok && cmd.free_conf < stt.free_trust_conf {
                 return intent;
             }
             intents::parse(free, lang)
         }
-        // Moonshine/Whisper are accurate but give no confidence. A command they also
-        // understood wins; otherwise the grammar command, if the transcripts agree on its
-        // words and the free one isn't a much longer sentence ("can you recommend a good
-        // movie" vs. "good morning"); everything else is a question.
+        // Moonshine gives no confidence. A command it also understood wins; otherwise the
+        // grammar command, if the transcripts agree on its words and the free one isn't a
+        // much longer sentence ("can you recommend a good movie" vs. "good morning"), or
+        // if the grammar heard it cleanly and confidently (Moonshine tiny mishears
+        // commands in noise); everything else is a question.
         _ => {
             let free_intent = intents::parse(free, lang);
+            let grammar_sure = !cmd.unk && cmd.conf >= stt.grammar_trust_conf;
+            // "timer" without a verb only falls back to the status ("wäsche den timer"):
+            // a clearly heard "cancel the timer" knows better
+            if free_intent == intents::Intent::TimerStatus && grammar_sure && !matches!(intent, Unknown(_)) {
+                return intent;
+            }
             if !matches!(free_intent, Unknown(_)) {
                 return free_intent;
             }
             // "[unk]" words don't matter here: the word agreement is the check.
-            if !matches!(intent, Unknown(_)) && agrees(&cmd.text, free) {
+            if !matches!(intent, Unknown(_)) && (agrees(&cmd.text, free) || grammar_sure) {
                 return intent;
             }
             free_intent
@@ -566,7 +567,41 @@ fn agrees(grammar: &str, free: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::agrees;
+    use super::*;
+
+    fn heard(grammar: &str, unk: bool, conf: f32, free: &str) -> speech::Command {
+        speech::Command {
+            text: grammar.into(),
+            unk,
+            conf,
+            free: Some(free.into()),
+            free_conf: 0.0,
+            free_kind: speech::FreeKind::Moonshine,
+            audio: Vec::new(),
+            command_start: 0,
+            addressed: false,
+            ended: Instant::now(),
+            endpoint_ms: 0.0,
+            stt_ms: 0.0,
+        }
+    }
+
+    #[test]
+    fn grammar_rescues_misheard_commands() {
+        use intents::Intent::*;
+        let stt = config::SttConfig::default();
+        let en = config::Lang::En;
+        // clean, confident grammar: the command runs although Moonshine heard garbage
+        assert_eq!(choose_intent(&heard("cancel the timer", false, 0.96, "is a scan sized handler"), en, &stt), CancelTimer);
+        // questions: unknown words or low confidence, so they stay questions
+        assert!(matches!(choose_intent(&heard("what is the", true, 1.0, "what is the capital of france"), en, &stt), Unknown(_)));
+        assert!(matches!(choose_intent(&heard("what time is it", false, 0.6, "why is the sky blue"), en, &stt), Unknown(_)));
+        // Moonshine's own command wins
+        assert_eq!(choose_intent(&heard("volume down", false, 1.0, "what time is it"), en, &stt), Time);
+        // ...unless it is only the timer status fallback
+        let de = config::Lang::De;
+        assert_eq!(choose_intent(&heard("lösche den timer", false, 0.95, "wäsche den timer jetzt"), de, &stt), CancelTimer);
+    }
 
     #[test]
     fn grammar_free_agreement() {

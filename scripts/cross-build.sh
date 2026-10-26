@@ -19,12 +19,9 @@ fi
 # A RUSTFLAGS from the environment would override the target flags below.
 unset RUSTFLAGS
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-# whisper.cpp (whisper feature) is built with cmake: use the cross compilers, and the
-# bindings bundled with whisper-rs-sys instead of running bindgen for the host.
+# C code (bundled SQLite) is built with the cross compiler
 export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
 export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
-export WHISPER_DONT_GENERATE_BINDINGS=1
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-L $PWD/$LIBDIR"
 cargo build --release --target aarch64-unknown-linux-gnu "$@"
 

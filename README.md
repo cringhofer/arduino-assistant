@@ -8,7 +8,7 @@ board.
  mic ─arecord─▶ Vosk wake word ─▶ Vosk grammar recognizer ──┐  (end of command, fallback)
                  ("computer")       + 1.5 s pre-roll         ├─▶ intent ─▶ skill ─▶ Piper ─aplay─▶ speaker
                                   ─▶ main engine: Moonshine ─┘        └─▶ else: local LLM (llama.cpp)
-                                     (or Whisper / Vosk)
+                                     (streamed while you speak)
  webcam ─v4l2─▶  photos, motion ("is anyone there?")        status page: http://<board>:8088
 ```
 
@@ -37,41 +37,40 @@ in one breath.
   with real room noise from the UNO Q's webcam mic it got 8/8 commands right, against 3/8
   for free Vosk. It also detects the end of the command (the words stop changing for 0.7 s)
   and confirms the wake word (`wake.verify`).
-* **Main engine (`stt.engine`):** transcribes the command (streaming Moonshine models
-  analyse it while you speak; the others once it has ended).
+* **Main engine (`stt.engine = "moonshine"`):** transcribes the command, analysing it
+  while you speak.
   * If its text is a command, that command runs.
   * If not, but the grammar heard a command with matching words, the grammar command runs.
   * Anything else is a question and goes to the LLM.
 
-### Speech-to-text engines
+### Speech-to-text: Moonshine
 
-Measured on the UNO Q (noisy test commands; for Moonshine small: median time from the end
-of speech to the answer in the running assistant, otherwise time to transcribe a ~3 s
-command):
+Moonshine (the official moonshine-voice runtime) transcribes every command, streamed while
+you speak; Vosk does the wake word, the end of the command and the command grammar. The
+runtime (`libmoonshine.so` + `libonnxruntime.so.1` from the moonshine-voice release) is
+loaded at run time; models come from `scripts/get-moonshine-model.sh en|de tiny|small DIR`.
+Switch models live on the status page (Admin).
 
-| `stt.engine` | Languages | Time | Notes |
+Measured on the UNO Q with noisy test commands in the running assistant (14 English, 12
+German; response = end of speech until the first sound, including Piper):
+
+| model | commands right | response | |
 |---|---|---|---|
-| `moonshine`, small streaming | EN, DE | **~4.3 s** | moonshine-voice runtime, streamed while you speak. **Default**: by far the most accurate in noise |
-| `moonshine`, tiny streaming | EN, DE | ~1.5–2 s | moonshine-voice runtime; weak in noise |
-| `moonshine`, tiny (sherpa-onnx) | EN | **0.6 s** | fastest; `moonshine_dir = …/sherpa-onnx-moonshine-tiny-en-int8` |
-| `moonshine`, base (sherpa-onnx) | EN | 1.2 s | `moonshine_dir = …-base-en-int8` |
-| `vosk` | EN, DE | none, runs live | grammar decides; free Vosk only for LLM questions. **For German.** |
-| `whisper` (tiny / base) | EN, DE | 6 s / 13 s | whisper.cpp via whisper-rs, best German transcripts; not in default build |
-| `candle` (tiny) | EN, DE | 8.5 s | Whisper in pure Rust (candle-transformers); q80 GGUF is slower here |
+| English tiny | 8 / 14 | **~2.6 s** | fast; misses more open questions in noise |
+| English small | **11 / 14** | ~5.7 s | most accurate in English (default) |
+| German tiny | **9–11 / 12** | **~2.2 s** | best for German (default), with built-in command keywords |
+| German small | 8 / 12 | ~5.9 s | not better than tiny in German |
 
-The UNO Q's Cortex-A53 cores lack dot-product and int8 matrix instructions, so Whisper
-models are slow on them. Whisper also always encodes a 30 s window. `whisper_short_window`
-encodes only the spoken audio and is faster, but in tests the transcripts got clearly
-worse, so it is off by default. Moonshine's encoder scales with the audio length, which is
-why it's ~10× faster.
+What made it faster: streaming the audio while you speak, giving Moonshine only 0.8 s
+before the wake detection (`stt.stream_preroll_secs`), decoding each line once instead of
+after every chunk, and keeping Piper running (first sound 0.9 s instead of 3–4 s). The
+grammar rescues commands Moonshine mishears when it heard them cleanly and confidently
+(`stt.grammar_trust_conf`). The board has no usable accelerator (Adreno 702: Vulkan 1.0
+only, no NPU) and its Cortex-A53 cores lack dot-product instructions, so this is CPU work.
 
-The model directory decides the Moonshine runtime: moonshine-voice models
-(`scripts/get-moonshine-model.sh en|de tiny|small DIR`, library from the moonshine-voice
-release, loaded at run time) or sherpa-onnx models. The moonshine-voice runtime is about 3×
-more CPU-hungry on this board for the same model, so its small model only keeps up thanks
-to streaming plus a shortened pre-roll. The German models are under the non-commercial
-[Moonshine Community License](https://www.moonshine.ai/license). Switch models live on the
-status page (Admin); `uno-assistant --config … --transcribe *.wav` benchmarks files.
+The German models are under the non-commercial
+[Moonshine Community License](https://www.moonshine.ai/license).
+`uno-assistant --config … --transcribe *.wav` benchmarks files.
 
 ## Hardware
 
@@ -86,18 +85,13 @@ status page (Admin); `uno-assistant --config … --transcribe *.wav` benchmarks 
 ```bash
 rustup target add aarch64-unknown-linux-gnu
 sudo apt install gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake unzip
-./scripts/cross-build.sh          # assistant (features: llm, moonshine, candle)
+./scripts/cross-build.sh          # assistant (features: llm, moonshine)
 ./scripts/build-llama.sh          # llama-server, only needed for the LLM
 ```
 
-Cargo features: `llm`, `moonshine`, `candle` (default), and `whisper` (whisper.cpp). Don't
-combine `whisper` with `moonshine`: both bring their own copy of libstdc++ template code
-(`std::regex`), and the binary can crash depending on which copy the linker picks. For
-whisper.cpp, build it separately:
-
-```bash
-./scripts/cross-build.sh --no-default-features --features llm,whisper
-```
+Cargo features: `llm` and `moonshine` (both default). The Moonshine library
+(`libmoonshine.so` + its `libonnxruntime.so.1`) is loaded at run time, so nothing of it is
+needed to build; `deploy.sh` downloads the release and installs it on the board.
 
 ## Install on the UNO Q
 
@@ -171,7 +165,7 @@ cargo test
 |---|---|
 | `src/main.rs` | event loop: audio → wake → listen → intent → reply, timers, engine choice |
 | `src/speech.rs` | wake word, grammar recognizer, end-of-command, main/free transcriber |
-| `src/moonshine_voice.rs`, `moonshine.rs`, `whisper.rs`, `candle_whisper.rs` | speech-to-text engines |
+| `src/moonshine.rs` | Moonshine speech-to-text (moonshine-voice library, streaming) |
 | `src/intents.rs`, `src/intents/de.rs` | transcript → intent, numbers, durations, grammars |
 | `src/skills.rs` | runs intents, replies in English/German, timers, volume, camera, LLM |
 | `src/status.rs`, `status.html` | status web page: Status, Stats, Info, Admin |

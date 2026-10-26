@@ -76,19 +76,12 @@ for e in onnx onnx.json; do
     get en_US-lessac-low.$e $VOICES/en/en_US/lessac/low/en_US-lessac-low.$e
     get de_DE-thorsten-low.$e $VOICES/de/de_DE/thorsten/low/de_DE-thorsten-low.$e
 done
-# Moonshine (new runtime): small = most accurate (~4-5 s per command on the UNO Q),
-# tiny = faster but weak in noise. Switch between them on the status page (Admin).
-if [[ $LANG_ == de ]]; then
-    bin/get-moonshine-model.sh de small $M/moonshine-small-streaming-de >/dev/null
-    bin/get-moonshine-model.sh de tiny $M/moonshine-tiny-streaming-de >/dev/null
-else
-    bin/get-moonshine-model.sh en small $M/moonshine-small-streaming-en >/dev/null
-fi
-# English fallback with sherpa-onnx: the fastest (~1 s per command)
-[[ -d $M/sherpa-onnx-moonshine-tiny-en-int8 ]] || {
-    curl -fsSL https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2 | tar xj -C $M
-    rm -rf $M/sherpa-onnx-moonshine-tiny-en-int8/test_wavs
-}
+# Moonshine speech-to-text, tiny and small (switch on the status page, Admin). Measured
+# on noisy test commands: English tiny 8/14 right in ~1.6 s, small 11/14 in ~4.7 s;
+# German tiny 11/12 in ~1.4 s (better than small).
+for size in tiny small; do
+    bin/get-moonshine-model.sh $LANG_ $size $M/moonshine-$size-streaming-$LANG_ >/dev/null
+done
 if ((LLM)); then
     get qwen2.5-0.5b-instruct-q4_k_m.gguf https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
 fi
@@ -97,9 +90,9 @@ C=~/.config/uno-assistant/config.toml
 if [[ ! -f $C ]]; then
     H=$HOME/uno-assistant
     if [[ $LANG_ == de ]]; then
-        VOSK=vosk-model-small-de-0.15 VOICE=de_DE-thorsten-low
+        VOSK=vosk-model-small-de-0.15 VOICE=de_DE-thorsten-low SIZE=tiny
     else
-        VOSK=vosk-model-small-en-us-0.15 VOICE=en_US-lessac-low
+        VOSK=vosk-model-small-en-us-0.15 VOICE=en_US-lessac-low SIZE=small
     fi
     MIC=$(arecord -L 2>/dev/null | grep -m1 '^plughw:CARD=.*DEV=0' || echo default)
     cat > $C <<EOF
@@ -118,7 +111,7 @@ playback_device = "default"
 model_path = "$H/models/$VOSK"
 # Moonshine transcribes every command (model switchable on the status page, Admin)
 engine = "moonshine"
-moonshine_dir = "$H/models/moonshine-small-streaming-$LANG_"
+moonshine_dir = "$H/models/moonshine-$SIZE-streaming-$LANG_"
 
 [tts]
 piper_bin = "$H/piper/piper"

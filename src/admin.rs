@@ -74,12 +74,11 @@ pub fn models(cfg: &Config) -> Vec<Value> {
             if !name.contains("moonshine") || model_lang(&name) != Some(cfg.language) {
                 return None;
             }
-            #[cfg(feature = "moonshine-voice")]
-            let new_runtime = crate::moonshine_voice::is_model_dir(&path);
-            #[cfg(not(feature = "moonshine-voice"))]
-            let new_runtime = false;
-            let sherpa = p.join("tokens.txt").exists();
-            if !new_runtime && !(sherpa && cfg!(feature = "moonshine")) {
+            #[cfg(feature = "moonshine")]
+            let usable = crate::moonshine::is_model_dir(&path);
+            #[cfg(not(feature = "moonshine"))]
+            let usable = false;
+            if !usable {
                 return None;
             }
             let size = ["tiny", "base", "small", "medium"].into_iter().find(|s| name.contains(s)).unwrap_or("?");
@@ -89,13 +88,12 @@ pub fn models(cfg: &Config) -> Vec<Value> {
                 "name": name,
                 "size": size,
                 "streaming": streaming,
-                "runtime": if new_runtime { "moonshine-voice" } else { "sherpa-onnx" },
                 "bytes": crate::info::size(&path),
             }))
         })
         .collect();
     let rank = |v: &Value| ["tiny", "base", "small", "medium"].iter().position(|s| v["size"] == *s).unwrap_or(9);
-    out.sort_by_key(|v| (rank(v), v["runtime"] != "moonshine-voice"));
+    out.sort_by_key(rank);
     out
 }
 
@@ -154,7 +152,7 @@ mod tests {
     #[test]
     fn model_language() {
         assert_eq!(model_lang("moonshine-small-streaming-de"), Some(Lang::De));
-        assert_eq!(model_lang("sherpa-onnx-moonshine-tiny-en-int8"), Some(Lang::En));
+        assert_eq!(model_lang("moonshine-tiny-streaming-en"), Some(Lang::En));
         assert_eq!(model_lang("moonshine-tiny-en"), Some(Lang::En));
         assert_eq!(model_lang("something"), None);
     }

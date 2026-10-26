@@ -808,9 +808,9 @@ function renderInfo(v) {
 let admin = null;
 // measured on the UNO Q with ~3 s commands
 function modelNote(m) {
-  if (m.runtime === 'sherpa-onnx') return m.size === 'tiny' ? 'fastest, about 1 s per command; less accurate in noise' : 'fast, about 1.5 s per command; English only';
-  if (m.size === 'tiny' && m.streaming) return 'about 1.5–2 s per command; weak in noise';
-  if (m.size === 'small') return 'most accurate; about 4 s per command (streaming)';
+  const de = admin?.language === 'de';
+  if (m.size === 'tiny' && m.streaming) return de ? 'fast, about 1.4 s; best for German (11 of 12 test commands)' : 'fast, about 1.6 s; misses more in noise (8 of 14 test commands)';
+  if (m.size === 'small') return de ? 'about 5 s; no better than tiny in German tests' : 'most accurate (11 of 14 test commands); about 4.7 s';
   if (m.size === 'medium') return 'too slow for this board';
   return 'slow on this board';
 }
@@ -837,7 +837,7 @@ function fillAdmin() {
   $('f-models').innerHTML = models.map(m =>
     `<label class="opt"><input type="radio" name="model" value="${esc(m.path)}">` +
     `<span><b>${esc(m.size)}${m.streaming ? ' streaming' : ''}</b>` +
-    `<small>${m.runtime === 'moonshine-voice' ? 'new Moonshine runtime' : esc(m.runtime)}${m.runtime ? ' · ' : ''}${modelNote(m)}</small></span>` +
+    `<small>${modelNote(m)}</small></span>` +
     `<span class="meta-r">${fmtBytes(m.bytes)}</span></label>`).join('') || '<p class="hint">No Moonshine models found.</p>';
   check('model', s.moonshine_dir);
   $('cfg-path').textContent = admin.config_path;

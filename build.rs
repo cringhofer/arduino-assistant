@@ -2,9 +2,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
-    // libvosk.so and the statically linked sherpa-onnx (Moonshine) both contain Kaldi and
-    // OpenFst. Without this, the executable exports its static copies and libvosk binds to
-    // them instead of its own: crash before main(). Keep static symbols private.
+    // Keep the symbols of statically linked C/C++ code (SQLite) private, so the shared
+    // libraries (libvosk, libmoonshine) only ever bind to their own copies.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
         println!("cargo:rustc-link-arg-bins=-Wl,--exclude-libs,ALL");
     }
@@ -24,7 +23,7 @@ fn main() {
     println!("cargo:rustc-env=BUILD_HOST={}", host.unwrap_or_default());
     // versions of the crates that matter, from Cargo.lock
     let lock = std::fs::read_to_string("Cargo.lock").unwrap_or_default();
-    let wanted = ["vosk", "sherpa-onnx", "candle-core", "candle-transformers", "whisper-rs", "rusqlite", "libsqlite3-sys", "libloading", "ureq"];
+    let wanted = ["vosk", "rusqlite", "libsqlite3-sys", "libloading", "ureq"];
     let mut deps = Vec::new();
     let mut name = "";
     for line in lock.lines() {

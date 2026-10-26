@@ -1,5 +1,5 @@
-//! Wake word detection and command transcription (Vosk), plus optional Moonshine /
-//! Whisper transcription of open questions.
+//! Wake word detection and command grammar (Vosk), plus the main speech-to-text engine
+//! (Moonshine, streamed while the command is spoken).
 
 use anyhow::{Context, Result, anyhow, bail};
 use vosk::{DecodingState, Model, Recognizer};
@@ -78,23 +78,14 @@ impl WakeDetector for VoskWake {
 pub enum FreeKind {
     Vosk,
     Moonshine,
-    #[cfg_attr(not(feature = "whisper"), allow(dead_code))]
-    Whisper,
-    Candle,
 }
 
-/// Second transcriber: the main engine (Moonshine/Whisper/candle, non-streaming, run on
-/// the command audio once it ended) or a streaming free Vosk recognizer for LLM questions.
+/// Second transcriber: the main engine (Moonshine, streamed while the command is spoken)
+/// or a free Vosk recognizer for LLM questions.
 enum Free {
     Vosk(Recognizer),
     #[cfg(feature = "moonshine")]
     Moonshine(crate::moonshine::Moonshine),
-    #[cfg(feature = "moonshine-voice")]
-    MoonshineVoice(crate::moonshine_voice::MoonshineVoice),
-    #[cfg(feature = "whisper")]
-    Whisper(crate::whisper::Whisper),
-    #[cfg(feature = "candle")]
-    Candle(crate::candle_whisper::CandleWhisper),
 }
 
 /// A finished command.
@@ -171,16 +162,12 @@ pub struct CommandListener {
     noise_db: f32,
     peak_db: f32,
     cut_wake_word: bool,
+    stream_preroll_secs: f32,
     /// Continuous mode: no wake word needed.
     continuous: bool,
     /// Audio time of the last chunk that still looked like speech.
     last_voice: f32,
 }
-
-/// Pre-roll chunks (100 ms) given to a streaming engine. On the UNO Q with the small model,
-/// 0.8 s: median response 4.3 s instead of 5.6 s (whole pre-roll, batch), no misses;
-/// 0.5 s cut off the start of some commands.
-const STREAM_PREROLL_CHUNKS: usize = 8;
 
 /// How long the full recognizer may take to confirm the wake word.
 const VERIFY_SECS: f32 = 2.5;
@@ -231,6 +218,7 @@ impl CommandListener {
             noise_db: -50.0,
             peak_db: -100.0,
             cut_wake_word: cfg.stt.cut_wake_word,
+            stream_preroll_secs: cfg.stt.stream_preroll_secs,
             continuous: false,
             last_voice: 0.0,
         })
@@ -244,19 +232,11 @@ impl CommandListener {
             None => json!({ "engine": "vosk (grammar only)", "model": model(&cfg.stt.model_path) }),
             Some(Free::Vosk(_)) => json!({ "engine": "vosk", "model": model(&cfg.stt.model_path) }),
             #[cfg(feature = "moonshine")]
-            Some(Free::Moonshine(_)) => json!({
-                "engine": "moonshine", "runtime": "sherpa-onnx", "model": model(&cfg.stt.moonshine_dir),
-            }),
-            #[cfg(feature = "moonshine-voice")]
-            Some(Free::MoonshineVoice(m)) => json!({
+            Some(Free::Moonshine(m)) => json!({
                 "engine": "moonshine", "runtime": format!("moonshine-voice (library {})", m.version),
                 "arch": m.arch, "model": model(&cfg.stt.moonshine_dir),
-                "library": crate::moonshine_voice::library_path(&cfg.stt.moonshine_lib),
+                "library": crate::moonshine::library_path(&cfg.stt.moonshine_lib),
             }),
-            #[cfg(feature = "whisper")]
-            Some(Free::Whisper(_)) => json!({ "engine": "whisper", "runtime": "whisper.cpp", "model": model(&cfg.stt.whisper_model) }),
-            #[cfg(feature = "candle")]
-            Some(Free::Candle(_)) => json!({ "engine": "whisper", "runtime": "candle", "model": model(&cfg.stt.candle_model_dir) }),
         }
     }
 
@@ -268,8 +248,8 @@ impl CommandListener {
         self.continuous = continuous;
         match &mut self.free {
             Some(Free::Vosk(f)) => f.reset(),
-            #[cfg(feature = "moonshine-voice")]
-            Some(Free::MoonshineVoice(m)) if m.streaming() => m.begin(),
+            #[cfg(feature = "moonshine")]
+            Some(Free::Moonshine(m)) if m.streaming() => m.begin(),
             _ => {}
         }
         self.wake_seen = false;
@@ -283,7 +263,8 @@ impl CommandListener {
         let preroll: Vec<&[i16]> = preroll.into_iter().collect();
         // Streaming Moonshine only gets the end of the pre-roll (the wake word was detected
         // just before): less to analyse on a slow CPU, same accuracy in tests.
-        let skip = if self.streaming_free() { preroll.len().saturating_sub(STREAM_PREROLL_CHUNKS) } else { 0 };
+        let keep = (self.stream_preroll_secs * 10.0).round() as usize; // 100 ms chunks
+        let skip = if self.streaming_free() { preroll.len().saturating_sub(keep) } else { 0 };
         for (i, chunk) in preroll.into_iter().enumerate() {
             if i < skip {
                 self.audio.extend_from_slice(chunk);
@@ -303,8 +284,8 @@ impl CommandListener {
 
     fn streaming_free(&self) -> bool {
         match &self.free {
-            #[cfg(feature = "moonshine-voice")]
-            Some(Free::MoonshineVoice(m)) => m.streaming(),
+            #[cfg(feature = "moonshine")]
+            Some(Free::Moonshine(m)) => m.streaming(),
             _ => false,
         }
     }
@@ -324,8 +305,8 @@ impl CommandListener {
                 }
             }
             // streaming: analysed while the command is spoken
-            #[cfg(feature = "moonshine-voice")]
-            Some(Free::MoonshineVoice(m)) if m.streaming() => m.push(samples),
+            #[cfg(feature = "moonshine")]
+            Some(Free::Moonshine(m)) if m.streaming() => m.push(samples),
             _ => {}
         }
     }
@@ -361,20 +342,8 @@ impl CommandListener {
                 Some((FreeKind::Vosk, all.text))
             }
             #[cfg(feature = "moonshine")]
-            Some(Free::Moonshine(m)) => Some((FreeKind::Moonshine, m.transcribe(command_audio))),
-            #[cfg(feature = "moonshine-voice")]
-            Some(Free::MoonshineVoice(m)) => Some((FreeKind::Moonshine, if m.streaming() { m.finish() } else { m.transcribe(command_audio) }.unwrap_or_else(|e| {
+            Some(Free::Moonshine(m)) => Some((FreeKind::Moonshine, if m.streaming() { m.finish() } else { m.transcribe(command_audio) }.unwrap_or_else(|e| {
                 log::error!("{e:#}");
-                String::new()
-            }))),
-            #[cfg(feature = "whisper")]
-            Some(Free::Whisper(w)) => Some((FreeKind::Whisper, w.transcribe(command_audio).unwrap_or_else(|e| {
-                log::error!("whisper: {e:#}");
-                String::new()
-            }))),
-            #[cfg(feature = "candle")]
-            Some(Free::Candle(w)) => Some((FreeKind::Candle, w.transcribe(command_audio).unwrap_or_else(|e| {
-                log::error!("candle whisper: {e:#}");
                 String::new()
             }))),
             None => None,
@@ -635,11 +604,9 @@ pub fn transcribe_files(model: &mut Model, cfg: &Config, files: &[String]) -> Re
                 r.reset();
                 t
             }
-            #[cfg(feature = "moonshine")]
-            Some(Free::Moonshine(m)) => m.transcribe(&samples),
             // streaming models: fed in real time like the mic; the time is the wait after the end
-            #[cfg(feature = "moonshine-voice")]
-            Some(Free::MoonshineVoice(m)) if m.streaming() => {
+            #[cfg(feature = "moonshine")]
+            Some(Free::Moonshine(m)) if m.streaming() => {
                 m.begin();
                 for chunk in samples.chunks(1600) {
                     m.push(chunk);
@@ -650,12 +617,8 @@ pub fn transcribe_files(model: &mut Model, cfg: &Config, files: &[String]) -> Re
                 println!("{:.2}\t{:.1}\t{f}\t{text}", end.elapsed().as_secs_f32(), samples.len() as f32 / SAMPLE_RATE as f32);
                 continue;
             }
-            #[cfg(feature = "moonshine-voice")]
-            Some(Free::MoonshineVoice(m)) => m.transcribe(&samples)?,
-            #[cfg(feature = "whisper")]
-            Some(Free::Whisper(w)) => w.transcribe(&samples)?,
-            #[cfg(feature = "candle")]
-            Some(Free::Candle(w)) => w.transcribe(&samples)?,
+            #[cfg(feature = "moonshine")]
+            Some(Free::Moonshine(m)) => m.transcribe(&samples)?,
             None => String::new(),
         };
         println!(
@@ -675,18 +638,22 @@ fn vosk_free(model: &Model) -> Result<Free> {
 }
 
 fn free_transcriber(model: &Model, cfg: &Config) -> Result<Free> {
-    use crate::config::{FreeEngine, Lang};
+    use crate::config::FreeEngine;
     match cfg.stt.engine {
         FreeEngine::Vosk => vosk_free(model),
-        // moonshine-voice model (English or German)
-        #[cfg(feature = "moonshine-voice")]
-        FreeEngine::Moonshine if crate::moonshine_voice::is_model_dir(&cfg.stt.moonshine_dir) => {
+        #[cfg(feature = "moonshine")]
+        FreeEngine::Moonshine => {
             let mut terms = vec![cfg.wake.word.clone()];
             terms.extend(cfg.stt.moonshine_keyterms.iter().cloned());
-            match crate::moonshine_voice::MoonshineVoice::new(&cfg.stt.moonshine_lib, &cfg.stt.moonshine_dir, &terms) {
+            // German command words: 9 → 11 of 12 test commands right with the tiny model
+            // (no effect in English)
+            if cfg.stt.moonshine_keyterms.is_empty() && cfg.language == crate::config::Lang::De {
+                terms.extend(["Timer", "Minuten", "Foto", "Witz", "leiser", "lauter", "lösche", "mal"].map(String::from));
+            }
+            match crate::moonshine::Moonshine::new(&cfg.stt.moonshine_lib, &cfg.stt.moonshine_dir, &terms) {
                 Ok(m) => {
-                    log::info!("main engine: Moonshine ({})", cfg.stt.moonshine_dir);
-                    Ok(Free::MoonshineVoice(m))
+                    log::info!("main engine: Moonshine {} ({})", m.arch, cfg.stt.moonshine_dir);
+                    Ok(Free::Moonshine(m))
                 }
                 Err(e) => {
                     log::error!("{e:#}, using Vosk for free dictation");
@@ -694,79 +661,10 @@ fn free_transcriber(model: &Model, cfg: &Config) -> Result<Free> {
                 }
             }
         }
-        FreeEngine::Moonshine if cfg.language != Lang::En => {
-            log::warn!("no Moonshine model for {:?} in {}, using Vosk for free dictation", cfg.language, cfg.stt.moonshine_dir);
-            vosk_free(model)
-        }
-        #[cfg(feature = "moonshine")]
-        FreeEngine::Moonshine => match crate::moonshine::Moonshine::new(&cfg.stt.moonshine_dir, cfg.stt.moonshine_threads) {
-            Ok(m) => {
-                log::info!("free dictation: Moonshine ({})", cfg.stt.moonshine_dir);
-                Ok(Free::Moonshine(m))
-            }
-            Err(e) => {
-                log::error!("{e:#}, using Vosk for free dictation");
-                vosk_free(model)
-            }
-        },
         #[cfg(not(feature = "moonshine"))]
         FreeEngine::Moonshine => {
             log::warn!("built without the `moonshine` feature, using Vosk for free dictation");
             vosk_free(model)
         }
-        #[cfg(feature = "candle")]
-        FreeEngine::Candle => match crate::candle_whisper::CandleWhisper::new(
-            &cfg.stt.candle_model_dir,
-            lang_code(cfg.language),
-            cfg.stt.whisper_short_window,
-            &cfg.wake.word,
-        ) {
-            Ok(w) => {
-                log::info!("free dictation: candle Whisper ({})", cfg.stt.candle_model_dir);
-                Ok(Free::Candle(w))
-            }
-            Err(e) => {
-                log::error!("{e:#}, using Vosk for free dictation");
-                vosk_free(model)
-            }
-        },
-        #[cfg(not(feature = "candle"))]
-        FreeEngine::Candle => {
-            log::warn!("built without the `candle` feature, using Vosk for free dictation");
-            vosk_free(model)
-        }
-        #[cfg(feature = "whisper")]
-        FreeEngine::Whisper => {
-            let lang = lang_code(cfg.language);
-            match crate::whisper::Whisper::new(
-                &cfg.stt.whisper_model,
-                lang,
-                cfg.stt.whisper_threads,
-                cfg.stt.whisper_short_window,
-                &cfg.wake.word,
-            ) {
-                Ok(w) => {
-                    log::info!("free dictation: Whisper ({})", cfg.stt.whisper_model);
-                    Ok(Free::Whisper(w))
-                }
-                Err(e) => {
-                    log::error!("{e:#}, using Vosk for free dictation");
-                    vosk_free(model)
-                }
-            }
-        }
-        #[cfg(not(feature = "whisper"))]
-        FreeEngine::Whisper => {
-            log::warn!("built without the `whisper` feature, using Vosk for free dictation");
-            vosk_free(model)
-        }
-    }
-}
-
-#[allow(dead_code)] // unused when built without Whisper engines
-fn lang_code(lang: crate::config::Lang) -> &'static str {
-    match lang {
-        crate::config::Lang::En => "en",
-        crate::config::Lang::De => "de",
     }
 }

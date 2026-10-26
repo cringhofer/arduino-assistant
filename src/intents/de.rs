@@ -4,7 +4,7 @@
 use super::{Intent, Op};
 
 pub fn parse(text: &str) -> Intent {
-    let t = text.trim().to_lowercase();
+    let t = split_mal(&text.trim().to_lowercase());
     let words: Vec<&str> = t.split_whitespace().collect();
     let has = |p: &str| format!(" {t} ").contains(&format!(" {p} "));
     let any = |ps: &[&str]| ps.iter().any(|p| has(p));
@@ -30,7 +30,7 @@ pub fn parse(text: &str) -> Intent {
         return Intent::TimerStatus;
     }
 
-    if any(&["lautstärke", "lauter", "leiser"]) {
+    if any(&["lautstärke", "lauter", "leiser", "leise"]) {
         if let Some(pos) = words.iter().position(|w| *w == "auf") {
             if let Some(n) = parse_number(&words[pos + 1..]) {
                 return Intent::SetVolume(n.clamp(0.0, 10.0) as u8);
@@ -39,7 +39,7 @@ pub fn parse(text: &str) -> Intent {
         if any(&["lauter", "erhöhe", "erhöhen", "hoch", "rauf"]) {
             return Intent::VolumeUp;
         }
-        if any(&["leiser", "runter", "verringere", "verringern", "niedriger"]) {
+        if any(&["leiser", "leise", "runter", "verringere", "verringern", "niedriger"]) {
             return Intent::VolumeDown;
         }
     }
@@ -112,6 +112,17 @@ const BASIC: &[(&str, u32)] = &[
 ];
 
 /// One German number word, including compounds: "einundzwanzig", "zweihundertfünfzig".
+/// "zwölfmal vier" -> "zwölf mal vier" (Moonshine writes it as one word).
+fn split_mal(t: &str) -> String {
+    t.split_whitespace()
+        .map(|w| match w.strip_suffix("mal") {
+            Some(n) if word_value(n).is_some() => format!("{n} mal"),
+            _ => w.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn word_value(w: &str) -> Option<f64> {
     if w.is_empty() {
         return None;
@@ -357,6 +368,10 @@ mod tests {
         assert_eq!(parse("mach ein foto"), Intent::TakePhoto);
         assert_eq!(parse("ist jemand da"), Intent::AnyoneThere);
         assert_eq!(parse("was ist zwölf mal vier"), Intent::Calc { a: 12.0, op: Op::Mul, b: 4.0 });
+        assert_eq!(parse("was ist zwölfmal vier"), Intent::Calc { a: 12.0, op: Op::Mul, b: 4.0 });
+        assert_eq!(parse("was ist 12mal 4"), Intent::Calc { a: 12.0, op: Op::Mul, b: 4.0 });
+        assert_eq!(parse("leise"), Intent::VolumeDown);
+        assert_eq!(parse("manchmal"), Intent::Unknown("manchmal".into()));
         assert_eq!(parse("was ist hundert geteilt durch fünf"), Intent::Calc { a: 100.0, op: Op::Div, b: 5.0 });
         assert_eq!(parse("erzähl mir einen witz"), Intent::Joke);
         assert_eq!(parse("stopp"), Intent::Stop);

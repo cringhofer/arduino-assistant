@@ -9,10 +9,7 @@ use serde_json::{Value, json};
 pub fn build() -> Value {
     // crates of features that are not built in are in Cargo.lock too
     let built = |name: &str| match name {
-        "sherpa-onnx" => cfg!(feature = "moonshine"),
-        "libloading" => cfg!(feature = "moonshine-voice"),
-        "whisper-rs" => cfg!(feature = "whisper"),
-        "candle-core" | "candle-transformers" => cfg!(feature = "candle"),
+        "libloading" => cfg!(feature = "moonshine"),
         "ureq" => cfg!(feature = "llm"),
         _ => true,
     };
@@ -25,9 +22,6 @@ pub fn build() -> Value {
     let features: Vec<&str> = [
         ("llm", cfg!(feature = "llm")),
         ("moonshine", cfg!(feature = "moonshine")),
-        ("moonshine-voice", cfg!(feature = "moonshine-voice")),
-        ("whisper", cfg!(feature = "whisper")),
-        ("candle", cfg!(feature = "candle")),
     ]
     .into_iter()
     .filter_map(|(f, on)| on.then_some(f))
