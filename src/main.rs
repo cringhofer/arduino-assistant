@@ -109,6 +109,11 @@ fn main() -> Result<()> {
     if args.print {
         cfg.tts.engine = TtsEngine::Print;
     }
+    if !args.transcribe.is_empty() {
+        let mut model = speech::load_model(&cfg.stt.model_path)?;
+        return speech::transcribe_files(&mut model, &cfg, &args.transcribe);
+    }
+
     let (tx, rx) = mpsc::channel();
 
     let camera = cfg
@@ -128,11 +133,6 @@ fn main() -> Result<()> {
             log::info!("action: {a}");
         }
         return Ok(());
-    }
-
-    if !args.transcribe.is_empty() {
-        let mut model = speech::load_model(&cfg.stt.model_path)?;
-        return speech::transcribe_files(&mut model, &cfg, &args.transcribe);
     }
 
     let history = cfg.history.enabled.then(|| {

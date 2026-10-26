@@ -810,7 +810,7 @@ let admin = null;
 function modelNote(m) {
   if (m.runtime === 'sherpa-onnx') return m.size === 'tiny' ? 'fastest, about 1 s per command; less accurate in noise' : 'fast, about 1.5 s per command; English only';
   if (m.size === 'tiny' && m.streaming) return 'about 1.5–2 s per command; weak in noise';
-  if (m.size === 'small') return 'most accurate; about 4–5 s per command';
+  if (m.size === 'small') return 'most accurate; about 4 s per command (streaming)';
   if (m.size === 'medium') return 'too slow for this board';
   return 'slow on this board';
 }

@@ -177,6 +177,11 @@ pub struct CommandListener {
     last_voice: f32,
 }
 
+/// Pre-roll chunks (100 ms) given to a streaming engine. On the UNO Q with the small model,
+/// 0.8 s: median response 4.3 s instead of 5.6 s (whole pre-roll, batch), no misses;
+/// 0.5 s cut off the start of some commands.
+const STREAM_PREROLL_CHUNKS: usize = 8;
+
 /// How long the full recognizer may take to confirm the wake word.
 const VERIFY_SECS: f32 = 2.5;
 
@@ -261,8 +266,11 @@ impl CommandListener {
     pub fn start<'a>(&mut self, preroll: impl IntoIterator<Item = &'a [i16]>, noise_db: f32, continuous: bool) {
         self.rec.reset();
         self.continuous = continuous;
-        if let Some(Free::Vosk(f)) = &mut self.free {
-            f.reset();
+        match &mut self.free {
+            Some(Free::Vosk(f)) => f.reset(),
+            #[cfg(feature = "moonshine-voice")]
+            Some(Free::MoonshineVoice(m)) if m.streaming() => m.begin(),
+            _ => {}
         }
         self.wake_seen = false;
         self.wake_end = None;
@@ -272,8 +280,16 @@ impl CommandListener {
         self.audio.clear();
         self.noise_db = noise_db;
         self.peak_db = -100.0;
-        for chunk in preroll {
-            self.feed_free(chunk);
+        let preroll: Vec<&[i16]> = preroll.into_iter().collect();
+        // Streaming Moonshine only gets the end of the pre-roll (the wake word was detected
+        // just before): less to analyse on a slow CPU, same accuracy in tests.
+        let skip = if self.streaming_free() { preroll.len().saturating_sub(STREAM_PREROLL_CHUNKS) } else { 0 };
+        for (i, chunk) in preroll.into_iter().enumerate() {
+            if i < skip {
+                self.audio.extend_from_slice(chunk);
+            } else {
+                self.feed_free(chunk);
+            }
             if let Ok(DecodingState::Finalized) = self.rec.accept_waveform(chunk) {
                 let u = utterance(&mut self.rec, false);
                 let _ = self.segment(u);
@@ -285,6 +301,14 @@ impl CommandListener {
         self.heard_speech = false;
     }
 
+    fn streaming_free(&self) -> bool {
+        match &self.free {
+            #[cfg(feature = "moonshine-voice")]
+            Some(Free::MoonshineVoice(m)) => m.streaming(),
+            _ => false,
+        }
+    }
+
     /// The wake word must be confirmed before a command counts.
     fn require_wake(&self) -> bool {
         self.verify && !self.continuous
@@ -292,11 +316,17 @@ impl CommandListener {
 
     fn feed_free(&mut self, samples: &[i16]) {
         self.audio.extend_from_slice(samples);
-        if let Some(Free::Vosk(f)) = &mut self.free {
-            if let Ok(DecodingState::Finalized) = f.accept_waveform(samples) {
-                // Keep the free transcript across its own endpoints.
-                self.free_text.push(utterance(f, false));
+        match &mut self.free {
+            Some(Free::Vosk(f)) => {
+                if let Ok(DecodingState::Finalized) = f.accept_waveform(samples) {
+                    // Keep the free transcript across its own endpoints.
+                    self.free_text.push(utterance(f, false));
+                }
             }
+            // streaming: analysed while the command is spoken
+            #[cfg(feature = "moonshine-voice")]
+            Some(Free::MoonshineVoice(m)) if m.streaming() => m.push(samples),
+            _ => {}
         }
     }
 
@@ -333,7 +363,7 @@ impl CommandListener {
             #[cfg(feature = "moonshine")]
             Some(Free::Moonshine(m)) => Some((FreeKind::Moonshine, m.transcribe(command_audio))),
             #[cfg(feature = "moonshine-voice")]
-            Some(Free::MoonshineVoice(m)) => Some((FreeKind::Moonshine, m.transcribe(command_audio).unwrap_or_else(|e| {
+            Some(Free::MoonshineVoice(m)) => Some((FreeKind::Moonshine, if m.streaming() { m.finish() } else { m.transcribe(command_audio) }.unwrap_or_else(|e| {
                 log::error!("{e:#}");
                 String::new()
             }))),
@@ -607,6 +637,19 @@ pub fn transcribe_files(model: &mut Model, cfg: &Config, files: &[String]) -> Re
             }
             #[cfg(feature = "moonshine")]
             Some(Free::Moonshine(m)) => m.transcribe(&samples),
+            // streaming models: fed in real time like the mic; the time is the wait after the end
+            #[cfg(feature = "moonshine-voice")]
+            Some(Free::MoonshineVoice(m)) if m.streaming() => {
+                m.begin();
+                for chunk in samples.chunks(1600) {
+                    m.push(chunk);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                let end = std::time::Instant::now();
+                let text = m.finish()?;
+                println!("{:.2}\t{:.1}\t{f}\t{text}", end.elapsed().as_secs_f32(), samples.len() as f32 / SAMPLE_RATE as f32);
+                continue;
+            }
             #[cfg(feature = "moonshine-voice")]
             Some(Free::MoonshineVoice(m)) => m.transcribe(&samples)?,
             #[cfg(feature = "whisper")]

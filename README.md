@@ -37,19 +37,24 @@ in one breath.
   with real room noise from the UNO Q's webcam mic it got 8/8 commands right, against 3/8
   for free Vosk. It also detects the end of the command (the words stop changing for 0.7 s)
   and confirms the wake word (`wake.verify`).
-* **Main engine (`stt.engine`):** transcribes the whole command once it has ended.
+* **Main engine (`stt.engine`):** transcribes the command (streaming Moonshine models
+  analyse it while you speak; the others once it has ended).
   * If its text is a command, that command runs.
   * If not, but the grammar heard a command with matching words, the grammar command runs.
   * Anything else is a question and goes to the LLM.
 
 ### Speech-to-text engines
 
-Measured on the UNO Q (time to transcribe one ~3 s command; noisy test recordings):
+Measured on the UNO Q (noisy test commands; for Moonshine small: median time from the end
+of speech to the answer in the running assistant, otherwise time to transcribe a ~3 s
+command):
 
 | `stt.engine` | Languages | Time | Notes |
 |---|---|---|---|
-| `moonshine` (tiny) | EN | **0.6 s** | Moonshine via sherpa-onnx. **Recommended for English.** |
-| `moonshine` (base) | EN | 1.2 s | `moonshine_dir = …-base-en-int8` |
+| `moonshine`, small streaming | EN, DE | **~4.3 s** | moonshine-voice runtime, streamed while you speak. **Default**: by far the most accurate in noise |
+| `moonshine`, tiny streaming | EN, DE | ~1.5–2 s | moonshine-voice runtime; weak in noise |
+| `moonshine`, tiny (sherpa-onnx) | EN | **0.6 s** | fastest; `moonshine_dir = …/sherpa-onnx-moonshine-tiny-en-int8` |
+| `moonshine`, base (sherpa-onnx) | EN | 1.2 s | `moonshine_dir = …-base-en-int8` |
 | `vosk` | EN, DE | none, runs live | grammar decides; free Vosk only for LLM questions. **For German.** |
 | `whisper` (tiny / base) | EN, DE | 6 s / 13 s | whisper.cpp via whisper-rs, best German transcripts; not in default build |
 | `candle` (tiny) | EN, DE | 8.5 s | Whisper in pure Rust (candle-transformers); q80 GGUF is slower here |
@@ -59,6 +64,14 @@ models are slow on them. Whisper also always encodes a 30 s window. `whisper_sho
 encodes only the spoken audio and is faster, but in tests the transcripts got clearly
 worse, so it is off by default. Moonshine's encoder scales with the audio length, which is
 why it's ~10× faster.
+
+The model directory decides the Moonshine runtime: moonshine-voice models
+(`scripts/get-moonshine-model.sh en|de tiny|small DIR`, library from the moonshine-voice
+release, loaded at run time) or sherpa-onnx models. The moonshine-voice runtime is about 3×
+more CPU-hungry on this board for the same model, so its small model only keeps up thanks
+to streaming plus a shortened pre-roll. The German models are under the non-commercial
+[Moonshine Community License](https://www.moonshine.ai/license). Switch models live on the
+status page (Admin); `uno-assistant --config … --transcribe *.wav` benchmarks files.
 
 ## Hardware
 
@@ -134,12 +147,15 @@ In `~/.config/uno-assistant/config.toml`:
 language = "de"
 [stt]
 model_path = "/home/arduino/uno-assistant/models/vosk-model-small-de-0.15"
-engine = "vosk"
+engine = "moonshine"
+moonshine_dir = "/home/arduino/uno-assistant/models/moonshine-small-streaming-de"
 [tts]
 piper_model = "/home/arduino/uno-assistant/models/de_DE-thorsten-low.onnx"
 ```
 
-Then run `systemctl --user restart uno-assistant`. The LLM is told to answer in German.
+Get the German models with `scripts/deploy.sh <host> --lang de` (or
+`get-moonshine-model.sh de small …`), then run `systemctl --user restart uno-assistant`.
+The LLM is told to answer in German.
 
 ## Testing without a microphone
 
@@ -155,9 +171,11 @@ cargo test
 |---|---|
 | `src/main.rs` | event loop: audio → wake → listen → intent → reply, timers, engine choice |
 | `src/speech.rs` | wake word, grammar recognizer, end-of-command, main/free transcriber |
-| `src/moonshine.rs`, `whisper.rs`, `candle_whisper.rs` | speech-to-text engines |
+| `src/moonshine_voice.rs`, `moonshine.rs`, `whisper.rs`, `candle_whisper.rs` | speech-to-text engines |
 | `src/intents.rs`, `src/intents/de.rs` | transcript → intent, numbers, durations, grammars |
 | `src/skills.rs` | runs intents, replies in English/German, timers, volume, camera, LLM |
-| `src/status.rs`, `status.html` | status web page |
+| `src/status.rs`, `status.html` | status web page: Status, Stats, Info, Admin |
+| `src/admin.rs`, `src/info.rs` | live settings saved to the config; what is running |
+| `src/history.rs` | SQLite history and latency, versioned schema migrations |
 | `src/audio.rs`, `tts.rs`, `camera.rs`, `llm.rs` | arecord/aplay, Piper/espeak, v4l2-ctl, llama-server |
 | `scripts/` | cross-build, llama-server build, deploy |
