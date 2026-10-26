@@ -152,6 +152,7 @@ pub struct SttConfig {
     /// sherpa-onnx models only.
     pub moonshine_threads: i32,
     /// libmoonshine.so of the moonshine-voice release (for moonshine-voice models).
+    /// Empty: lib/moonshine/libmoonshine.so next to the program's bin directory.
     pub moonshine_lib: String,
     /// Words to bias Moonshine towards, besides the wake word (moonshine-voice models).
     pub moonshine_keyterms: Vec<String>,
@@ -186,7 +187,7 @@ impl Default for SttConfig {
             engine: FreeEngine::Moonshine,
             moonshine_dir: "/opt/uno-assistant/models/moonshine-small-streaming-en".into(),
             moonshine_threads: 2,
-            moonshine_lib: "/opt/uno-assistant/lib/libmoonshine.so".into(),
+            moonshine_lib: String::new(),
             moonshine_keyterms: Vec::new(),
             whisper_model: "/opt/uno-assistant/models/ggml-base-q5_1.bin".into(),
             whisper_threads: 4,

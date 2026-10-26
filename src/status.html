@@ -711,7 +711,8 @@ function renderMode() {
 const fmtBytes = b => b == null ? '–' : b < 1024 ** 2 ? Math.round(b / 1024) + ' KB'
   : b < 1024 ** 3 ? (b / 1024 ** 2).toFixed(b < 10 * 1024 ** 2 ? 1 : 0) + ' MB' : (b / 1024 ** 3).toFixed(2) + ' GB';
 const kib = k => k == null ? null : k * 1024;
-const longDur = s => s >= 86400 ? Math.floor(s / 86400) + ' d ' + dur(s % 86400) : dur(s);
+const longDur = s => { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+                     return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`; };
 const code = s => s ? `<code>${esc(s)}</code>` : null;
 const chips = a => a?.length ? `<span class="chips">${a.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</span>` : null;
 const good = t => `<span class="good">${t}</span>`, bad = t => `<span class="bad">${t}</span>`;
@@ -759,7 +760,7 @@ function renderInfo(v) {
       ['library', code(m.library)],
       ['command grammar', st.grammar ? (st.grammar.enabled ? 'Vosk grammar' : 'off') : null],
       ['Vosk model', modelHtml(st.grammar?.model)],
-      ['end of speech', st.end_silence_secs != null ? `${st.end_silence_secs} s without new words` : null],
+      ['end of speech', st.end_silence_secs != null ? `${+st.end_silence_secs.toFixed(2)} s without new words` : null],
       ['recordings', st.record_dir ? code(st.record_dir) : 'off'],
     ]),
     card('Voice and LLM', [
@@ -807,7 +808,7 @@ function renderInfo(v) {
 let admin = null;
 // measured on the UNO Q with ~3 s commands
 function modelNote(m) {
-  if (m.runtime === 'sherpa-onnx') return 'fastest, about 1 s per command; less accurate in noise';
+  if (m.runtime === 'sherpa-onnx') return m.size === 'tiny' ? 'fastest, about 1 s per command; less accurate in noise' : 'fast, about 1.5 s per command; English only';
   if (m.size === 'tiny' && m.streaming) return 'about 1.5–2 s per command; weak in noise';
   if (m.size === 'small') return 'most accurate; about 4–5 s per command';
   if (m.size === 'medium') return 'too slow for this board';

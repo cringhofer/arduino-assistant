@@ -94,11 +94,27 @@ fn arch(dir: &str) -> Result<u32> {
     })
 }
 
+/// The configured library, or by default lib/moonshine/libmoonshine.so next to the
+/// program's bin directory (as deployed), else the library search path.
+pub fn library_path(configured: &str) -> String {
+    if !configured.is_empty() {
+        return configured.to_string();
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.parent()?.join("lib/moonshine/libmoonshine.so")))
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "libmoonshine.so".into())
+}
+
 impl MoonshineVoice {
     /// `lib`: path of libmoonshine.so (or just the name, to use the library search path).
     /// `keyterms`: words to bias recognition towards (the wake word, command words).
     pub fn new(lib: &str, dir: &str, keyterms: &[String]) -> Result<Self> {
         let arch = arch(dir)?;
+        let lib = library_path(lib);
+        let lib = lib.as_str();
         // SAFETY: loading the moonshine library runs no unusual initialisers.
         let lib = unsafe { Library::new(lib) }.with_context(|| format!("loading {lib}"))?;
         let (load, transcribe, error, free, version) = unsafe {

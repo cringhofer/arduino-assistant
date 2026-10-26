@@ -57,8 +57,9 @@ engine = "moonshine"
 # vosk only: trust the free transcript over the grammar one from this mean confidence
 free_trust_conf = 0.9
 moonshine_dir = "/opt/uno-assistant/models/moonshine-small-streaming-en"
-# libmoonshine.so from the moonshine-voice release (for moonshine-voice models)
-moonshine_lib = "/opt/uno-assistant/lib/moonshine/libmoonshine.so"
+# libmoonshine.so from the moonshine-voice release (for moonshine-voice models).
+# Empty: lib/moonshine/libmoonshine.so next to the program's bin directory.
+moonshine_lib = ""
 # extra words to bias moonshine-voice streaming models towards (the wake word always is)
 moonshine_keyterms = []
 # sherpa-onnx models only

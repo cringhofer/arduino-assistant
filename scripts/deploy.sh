@@ -119,7 +119,6 @@ model_path = "$H/models/$VOSK"
 # Moonshine transcribes every command (model switchable on the status page, Admin)
 engine = "moonshine"
 moonshine_dir = "$H/models/moonshine-small-streaming-$LANG_"
-moonshine_lib = "$H/lib/moonshine/libmoonshine.so"
 
 [tts]
 piper_bin = "$H/piper/piper"

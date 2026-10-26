@@ -7,9 +7,19 @@ use serde_json::{Value, json};
 
 /// The program itself, fixed at build time (see build.rs).
 pub fn build() -> Value {
+    // crates of features that are not built in are in Cargo.lock too
+    let built = |name: &str| match name {
+        "sherpa-onnx" => cfg!(feature = "moonshine"),
+        "libloading" => cfg!(feature = "moonshine-voice"),
+        "whisper-rs" => cfg!(feature = "whisper"),
+        "candle-core" | "candle-transformers" => cfg!(feature = "candle"),
+        "ureq" => cfg!(feature = "llm"),
+        _ => true,
+    };
     let deps: serde_json::Map<String, Value> = env!("BUILD_DEPS")
         .split(',')
         .filter_map(|d| d.split_once('='))
+        .filter(|(n, _)| built(n))
         .map(|(n, v)| (n.to_string(), json!(v)))
         .collect();
     let features: Vec<&str> = [

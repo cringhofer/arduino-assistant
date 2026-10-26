@@ -245,7 +245,8 @@ impl CommandListener {
             #[cfg(feature = "moonshine-voice")]
             Some(Free::MoonshineVoice(m)) => json!({
                 "engine": "moonshine", "runtime": format!("moonshine-voice (library {})", m.version),
-                "arch": m.arch, "model": model(&cfg.stt.moonshine_dir), "library": cfg.stt.moonshine_lib,
+                "arch": m.arch, "model": model(&cfg.stt.moonshine_dir),
+                "library": crate::moonshine_voice::library_path(&cfg.stt.moonshine_lib),
             }),
             #[cfg(feature = "whisper")]
             Some(Free::Whisper(_)) => json!({ "engine": "whisper", "runtime": "whisper.cpp", "model": model(&cfg.stt.whisper_model) }),
