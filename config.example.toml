@@ -1,0 +1,115 @@
+# uno-assistant configuration. Every key is optional; the values below are the defaults.
+
+# Language of commands and replies: "en" or "de". The speech model (stt.model_path) and
+# the Piper voice (tts.piper_model) must match it.
+language = "en"
+
+[wake]
+# Wake word or short phrase, lowercase; any word(s) in the Vosk model's vocabulary work,
+# e.g. "computer", "hey computer", "jarvis" (the log says if a word is unknown).
+word = "computer"
+engine = "vosk"
+# Second opinion from the command recognizer before acting (drops "commuter", TV chatter...).
+verify = true
+# "word": wait for the wake word. "continuous": no wake word, transcribe everything that
+# is said (also switchable on the status page).
+mode = "word"
+# Continuous mode: "none" = only transcribe, "commands" = also run recognized commands
+# (questions only go to the LLM when addressed with the wake word), "all" = everything.
+continuous_act = "commands"
+
+[audio]
+# Find devices with `arecord -L` / `aplay -L`. Prefer plughw: devices, they convert
+# rates and channels. Webcam mics show up as e.g. "plughw:CARD=C960,DEV=0".
+capture_device = "default"
+playback_device = "default"
+# For "volume up/down": card and control from `amixer -c 1 scontrols`.
+mixer_card = "0"
+mixer_control = "PCM"
+
+[stt]
+# Vosk model: vosk-model-small-en-us-0.15 or vosk-model-small-de-0.15
+model_path = "/opt/uno-assistant/models/vosk-model-small-en-us-0.15"
+# Restrict command recognition to the phrases the skills understand. Much more accurate
+# with a distant or noisy microphone.
+grammar = true
+initial_silence_secs = 5.0
+max_command_secs = 10.0
+# The command is complete once the transcript hasn't changed for this long.
+end_silence_secs = 0.7
+
+# Main speech-to-text engine (each a cargo feature, all in the default build):
+#   "vosk"      the grammar recognizer decides; a free Vosk recognizer runs only for LLM
+#               questions. Streaming, no extra delay, weak on free speech in noise.
+#   "moonshine" Moonshine transcribes every command. Recommended, English and German.
+#               The model directory decides the runtime:
+#               - moonshine-voice models (scripts/get-moonshine-model.sh), English and
+#                 German. On the UNO Q: small ~4-5 s per command (most accurate),
+#                 tiny ~1.5-2 s (weak in noise). Needs moonshine_lib.
+#               - sherpa-onnx models (sherpa-onnx-moonshine-tiny-en-int8), English only,
+#                 the fastest: ~1 s per command.
+#   "whisper"   Whisper via whisper.cpp (whisper-rs): English and German, ~6 s (tiny).
+#               Not in the default build (conflicts with moonshine), see README.
+#   "candle"    Whisper in pure Rust (candle-transformers): English and German, ~8.5 s.
+# Vosk always does the wake word and end-of-command detection, and with grammar = true
+# its result is the fallback when the main engine mishears a command in noise.
+engine = "moonshine"
+# vosk only: trust the free transcript over the grammar one from this mean confidence
+free_trust_conf = 0.9
+moonshine_dir = "/opt/uno-assistant/models/moonshine-small-streaming-en"
+# libmoonshine.so from the moonshine-voice release (for moonshine-voice models)
+moonshine_lib = "/opt/uno-assistant/lib/moonshine/libmoonshine.so"
+# extra words to bias moonshine-voice streaming models towards (the wake word always is)
+moonshine_keyterms = []
+# sherpa-onnx models only
+moonshine_threads = 2
+# multilingual ggml model, e.g. ggml-tiny-q5_1.bin / ggml-base-q5_1.bin
+whisper_model = "/opt/uno-assistant/models/ggml-base-q5_1.bin"
+whisper_threads = 4
+# Whisper engines: encode only the spoken audio instead of a fixed 30 s window. Faster,
+# but in tests transcripts got clearly worse (truncated or garbage), so off by default.
+whisper_short_window = false
+# config*.json + tokenizer*.json + model *.safetensors (openai/whisper-tiny) or *.gguf
+# (lmz/candle-whisper model-tiny-q80.gguf)
+candle_model_dir = "/opt/uno-assistant/models/candle-whisper-tiny"
+
+[tts]
+# "piper" (natural), "espeak" (tiny, robotic) or "print" (log only)
+engine = "piper"
+piper_bin = "/opt/uno-assistant/piper/piper"
+# en_US-lessac-low.onnx or de_DE-thorsten-low.onnx
+piper_model = "/opt/uno-assistant/models/en_US-lessac-low.onnx"
+# audio.sample_rate from the voice's .onnx.json (low = 16000, medium = 22050)
+piper_sample_rate = 16000
+espeak_voice = "en-us"
+
+[camera]
+# Needs ffmpeg.
+enabled = true
+device = "/dev/video0"
+photo_dir = "/var/lib/uno-assistant/photos"
+# Low-res (80x60 @ 2 fps) motion detection for "is anyone there?"
+presence = true
+motion_threshold = 8.0
+# Say hello when someone shows up after the room was empty this long (0 = off).
+greet_after_absent_mins = 0
+
+[llm]
+# Answer everything that isn't a command with a small local model served by llama.cpp's
+# llama-server (Qwen2.5-0.5B-Instruct: ~470 MB, ~7 tokens/s on the UNO Q).
+enabled = false
+url = "http://127.0.0.1:8080/v1/chat/completions"
+max_tokens = 80
+timeout_secs = 30
+
+[status]
+# Web page showing what was heard, done and said: http://<board-ip>:8088
+enabled = true
+listen = "0.0.0.0:8088"
+
+[history]
+# Every conversation turn in SQLite (survives restarts, "Load older" on the status page).
+enabled = true
+db_path = "/var/lib/uno-assistant/history.db"
+# Keep the recorded command and reply audio of this many most recent turns.
+keep_audio = 200

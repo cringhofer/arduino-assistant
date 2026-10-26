@@ -1,0 +1,901 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Computer</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --surface: #ffffff; --text: #16191d; --muted: #6b7380; --faint: #9aa1ac;
+    --line: #e6e8ec; --accent: #2f6fed; --accent-soft: #e9f0fe; --you: #2f6fed; --you-text: #ffffff;
+    --bot: #f0f2f5; --ok: #1f9d55; --warn: #d98a0b; --err: #d64545;
+    --radius: 14px; --shadow: 0 1px 2px rgba(16, 24, 40, .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1013; --surface: #16191e; --text: #e8eaed; --muted: #8e96a3; --faint: #626a76;
+      --line: #252a31; --accent: #6b9bff; --accent-soft: #1b2638; --you: #3d6fe0; --you-text: #ffffff;
+      --bot: #20242a; --ok: #3ccf7c; --warn: #f0a530; --err: #ff6b6b; --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; }
+
+  /* top bar */
+  .top { position: sticky; top: 0; z-index: 5; isolation: isolate; background: color-mix(in srgb, var(--bg) 88%, transparent);
+         backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  .top-in { max-width: 1080px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+  .brand { font-weight: 650; font-size: 17px; letter-spacing: -.01em; }
+  .state { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); text-transform: capitalize; min-width: 84px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--faint)); }
+  .state.busy .dot { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform: scale(1.6); opacity: .5; } }
+  .spacer { flex: 1; }
+  .mic { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--faint); }
+  .meter { width: 72px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .15s linear; }
+  /* overlay below the bar: showing it never moves the page */
+  .live { position: absolute; left: 0; right: 0; top: 100%; background: color-mix(in srgb, var(--bg) 94%, transparent);
+          backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); font-size: 18px;
+          opacity: 0; transform: translateY(-4px); pointer-events: none; transition: opacity .15s, transform .15s; }
+  .live > div { max-width: 1080px; margin: 0 auto; padding: 10px 16px; overflow-wrap: anywhere; }
+  .live.on { opacity: 1; transform: none; }
+  .live span { color: var(--faint); }
+  .error { max-width: 1080px; margin: 12px auto 0; padding: 0 16px; color: var(--err); display: none; }
+
+  /* layout */
+  .page { max-width: 1080px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 24px;
+          grid-template-columns: minmax(0, 1fr) 300px; align-items: start; }
+  @media (max-width: 860px) { .page { grid-template-columns: minmax(0, 1fr); } }
+  .feed-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0; }
+  .toggle { font-size: 13px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+
+  /* conversation */
+  .turn { padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .turn.ignored { display: none; }
+  .show-ignored .turn.ignored { display: block; opacity: .55; }
+  .meta { font-size: 12px; color: var(--faint); margin-bottom: 6px; display: flex; gap: 8px; }
+  .line { display: flex; align-items: flex-end; gap: 6px; margin: 4px 0; }
+  .line.you { justify-content: flex-end; }
+  .bubble { max-width: min(560px, 82%); padding: 8px 13px; border-radius: 18px; overflow-wrap: anywhere; }
+  .you .bubble { background: var(--you); color: var(--you-text); border-bottom-right-radius: 6px; }
+  .bot .bubble { background: var(--bot); border-bottom-left-radius: 6px; }
+  .bubble img { display: block; width: 100%; max-width: 360px; border-radius: 10px; margin-top: 8px; cursor: zoom-in; }
+  .system { font-size: 13px; color: var(--muted); }
+  .play { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface);
+          display: grid; place-items: center; cursor: pointer; color: var(--muted); padding: 0; }
+  .play:hover { color: var(--accent); border-color: var(--accent); }
+  .play.on { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+  .play svg { width: 12px; height: 12px; fill: currentColor; }
+  .foot { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .tag { padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  details { font-size: 12px; color: var(--muted); }
+  summary { cursor: pointer; color: var(--faint); list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  details[open] summary { margin-bottom: 6px; }
+  dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; margin: 0; }
+  dl.kv dt { color: var(--faint); }
+  dl.kv dd { margin: 0; overflow-wrap: anywhere; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .empty { color: var(--muted); padding: 32px 0; text-align: center; }
+  .more { display: block; margin: 18px auto 0; }
+
+  /* side cards */
+  aside { display: grid; gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
+  .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .btn { padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 13px; }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .timer { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; padding: 3px 0; }
+  .timer b { font-weight: 600; }
+  .hero { width: 100%; border-radius: 10px; display: block; cursor: zoom-in; aspect-ratio: 16 / 9; object-fit: cover; background: var(--bot); }
+  .thumbs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 6px; }
+  .thumbs img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; cursor: zoom-in; }
+  .hint { font-size: 13px; color: var(--muted); }
+
+  /* tabs + mode switch */
+  .tabs, .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--line); }
+  .tabs button, .seg button { border: 0; background: none; padding: 3px 12px; border-radius: 999px; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .tabs button[aria-selected="true"], .seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+  [hidden] { display: none !important; }
+
+  /* latency */
+  .viz { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --grid: #e6e8ec; }
+  @media (prefers-color-scheme: dark) { .viz { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --grid: #252a31; } }
+  .lat-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .hero-stat { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .hero-stat b { font-size: 40px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .hero-stat span { color: var(--muted); font-size: 13px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 18px; }
+  .tile { text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; cursor: pointer; }
+  .tile:hover { border-color: var(--faint); }
+  .tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .tile .k { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .tile .k i { width: 8px; height: 8px; border-radius: 2px; background: var(--c, transparent); flex: none; }
+  .tile .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .s { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .chart { position: relative; margin-bottom: 22px; }
+  .chart h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .chart p.sub { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .chart svg text { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 2px; background: var(--c); }
+  .tip { position: absolute; pointer-events: none; z-index: 3; background: var(--surface); border: 1px solid var(--line);
+         border-radius: 8px; padding: 6px 9px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.12); white-space: nowrap; display: none; }
+  .tip b { font-weight: 600; }
+  .tip .r { display: flex; gap: 8px; justify-content: space-between; font-variant-numeric: tabular-nums; }
+  .tip .r i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--c); margin-right: 5px; }
+  table.data { border-collapse: collapse; font-size: 12px; width: 100%; font-variant-numeric: tabular-nums; }
+  table.data th, table.data td { text-align: right; padding: 3px 8px; border-bottom: 1px solid var(--line); }
+  table.data th:first-child, table.data td:first-child { text-align: left; }
+  table.data th { color: var(--muted); font-weight: 500; }
+  .lat-turn { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+  #latency-view { position: relative; }
+
+  /* menu + pages */
+  .nav { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--line); }
+  .nav a { padding: 4px 13px; border-radius: 999px; font-size: 13px; color: var(--muted); text-decoration: none; }
+  .nav a:hover { color: var(--text); }
+  .nav a[aria-current="page"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); font-weight: 550; }
+  .page.single { grid-template-columns: minmax(0, 1fr); }
+  .page-head { display: flex; align-items: center; justify-content: space-between; gap: 10px 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  h1 { font-size: 20px; font-weight: 650; letter-spacing: -.01em; margin: 0; }
+  .seg.wide { display: flex; margin-bottom: 8px; }
+  .seg.wide button { flex: 1; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+  .good { color: var(--ok); font-weight: 500; }
+  .bad { color: var(--err); font-weight: 500; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--bot); white-space: nowrap; }
+  .bar { height: 5px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 4px; max-width: 220px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+
+  /* info */
+  .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; align-items: start; }
+  .info-grid dl.kv { font-size: 13px; gap: 6px 14px; }
+
+  /* admin */
+  .admin { max-width: 720px; display: grid; gap: 22px; padding: 20px; }
+  .field { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; min-width: 0; }
+  .label { font-weight: 600; font-size: 14px; padding: 0; }
+  .field small, .opt small { color: var(--muted); font-size: 12px; }
+  #f-wake { font: inherit; font-size: 16px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--line);
+            background: var(--bg); color: var(--text); width: 100%; max-width: 320px; }
+  #f-wake:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .opt { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .opt:hover { border-color: var(--faint); }
+  .opt:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .opt input { margin: 3px 0 0; accent-color: var(--accent); }
+  .opt span { display: grid; gap: 1px; min-width: 0; }
+  .opt .meta-r { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; display: block; }
+  .actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn.primary { background: var(--accent); color: #fff; border-color: transparent; font-weight: 550; }
+  .btn.primary:hover { color: #fff; filter: brightness(1.08); }
+  .msg { font-size: 13px; color: var(--muted); }
+  .msg.ok { color: var(--ok); }
+  .msg.err { color: var(--err); }
+
+  /* phones */
+  @media (max-width: 600px) {
+    body { font-size: 14px; }
+    .top-in { padding: 10px 16px; }
+    .brand { font-size: 16px; }
+    .mic-label { display: none; }
+    .meter { width: 48px; }
+    .seg button, .tabs button { padding: 3px 9px; }
+    .page { padding-top: 14px; gap: 16px; }
+    .bubble { max-width: 88%; }
+    .hero-stat b { font-size: 32px; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tile .v { font-size: 17px; }
+    .thumbs { grid-template-columns: repeat(4, 1fr); }
+  }
+  @media (max-width: 600px) {
+    .nav { order: 5; width: 100%; }
+    .nav a { flex: 1; text-align: center; padding: 5px 4px; }
+    .info-grid { grid-template-columns: minmax(0, 1fr); }
+    .admin { padding: 14px; }
+  }
+
+  /* lightbox */
+  .lightbox { position: fixed; inset: 0; background: rgba(0, 0, 0, .85); display: none; place-items: center; z-index: 10; cursor: zoom-out; }
+  .lightbox.on { display: grid; }
+  .lightbox img { max-width: 94vw; max-height: 90vh; border-radius: 8px; }
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="top-in">
+    <span class="brand">Computer</span>
+    <span class="state" id="state"><span class="dot"></span><span id="state-text">connecting</span></span>
+    <nav class="nav" aria-label="Pages">
+      <a href="#status" data-page="status">Status</a><a href="#stats" data-page="stats">Stats</a><a href="#info" data-page="info">Info</a><a href="#admin" data-page="admin">Admin</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="mic" title="Microphone level"><span class="mic-label">mic</span> <span class="meter"><i id="level"></i></span></span>
+  </div>
+  <div class="live" id="live" aria-live="polite"><div id="live-text"></div></div>
+</div>
+<div class="error" id="error"></div>
+
+<div class="page" id="page-status">
+  <main>
+    <div class="feed-head">
+      <h2>Conversation</h2>
+      <label class="toggle"><input type="checkbox" id="show-ignored"> show ignored</label>
+    </div>
+    <section id="conversation-view">
+      <div id="feed"><div class="empty" id="empty">Nothing yet.</div></div>
+      <div id="older"></div>
+      <button class="btn more" id="more" type="button">Load older</button>
+    </section>
+  </main>
+
+  <aside>
+    <section class="card">
+      <div class="card-head"><h2>Listening</h2></div>
+      <span class="seg wide" role="group" aria-label="Listening mode">
+        <button type="button" data-mode="0" aria-pressed="true">Wake word</button><button type="button" data-mode="1" aria-pressed="false">Continuous</button>
+      </span>
+      <p class="hint" id="mode-hint"></p>
+    </section>
+    <section class="card" id="timers-card" hidden>
+      <div class="card-head"><h2>Timers</h2></div>
+      <div id="timers"></div>
+    </section>
+    <section class="card" id="camera-card" hidden>
+      <div class="card-head"><h2>Camera</h2><button class="btn" id="snap" type="button">Take photo</button></div>
+      <div id="photos"></div>
+    </section>
+    <section class="card">
+      <div class="card-head"><h2>System</h2></div>
+      <dl class="kv" id="info"></dl>
+    </section>
+  </aside>
+</div>
+
+<div class="page single" id="page-stats" hidden>
+  <div class="page-head">
+    <h1>Response times</h1>
+    <span class="seg" id="range" role="group" aria-label="Time range">
+      <button type="button" data-h="1">1 h</button><button type="button" data-h="24" aria-pressed="true">24 h</button><button type="button" data-h="168">7 d</button><button type="button" data-h="720">30 d</button>
+    </span>
+  </div>
+  <section id="latency-view" class="viz">
+    <div class="hero-stat"><b id="resp-med">–</b><span id="resp-sub">median response: from the end of what you said until the answer starts</span></div>
+    <div class="tiles" id="tiles"></div>
+    <div class="chart" id="stack-chart">
+      <h3>Where the wait goes</h3>
+      <p class="sub">Most recent commands, newest on top: end-of-speech detection, speech to text, thinking (intent, command, LLM, camera), voice synthesis until the first sound.</p>
+      <div class="legend" id="stack-legend"></div>
+      <svg id="stack" role="img" aria-label="Response time per command split by stage"></svg>
+      <details><summary>table</summary><div id="stack-table"></div></details>
+    </div>
+    <div class="chart">
+      <h3 id="series-title">Over time</h3>
+      <p class="sub" id="series-sub">Every measurement; the dashed line is the median. Pick a stage above.</p>
+      <svg id="series" role="img" aria-label="Latency of the selected stage over time"></svg>
+    </div>
+    <div class="tip" id="tip"></div>
+  </section>
+</div>
+
+<div class="page single" id="page-info" hidden>
+  <div class="page-head"><h1>What is running</h1><span class="hint" id="info-updated"></span></div>
+  <div class="info-grid" id="info-grid"><p class="hint">Loading…</p></div>
+</div>
+
+<div class="page single" id="page-admin" hidden>
+  <div class="page-head"><h1>Settings</h1></div>
+  <form class="card admin" id="admin-form" autocomplete="off">
+    <label class="field">
+      <span class="label">Wake word</span>
+      <input id="f-wake" name="wake" required maxlength="40" spellcheck="false">
+      <small>One to three words the speech model knows, e.g. <i>computer</i>, <i>jarvis</i> or <i>hey computer</i>. Longer, unusual words cause fewer false wakes.</small>
+    </label>
+    <fieldset class="field">
+      <legend class="label">Listening mode</legend>
+      <label class="opt"><input type="radio" name="mode" value="word"><span><b>Wake word</b><small>Listens for a command after the wake word.</small></span></label>
+      <label class="opt"><input type="radio" name="mode" value="continuous"><span><b>Continuous</b><small>No wake word: transcribes everything that is said.</small></span></label>
+    </fieldset>
+    <fieldset class="field">
+      <legend class="label">In continuous mode, act on</legend>
+      <label class="opt"><input type="radio" name="act" value="commands"><span><b>Commands</b><small>Runs recognized commands. Questions only go to the LLM when they start with the wake word.</small></span></label>
+      <label class="opt"><input type="radio" name="act" value="all"><span><b>Everything</b><small>Every sentence is handled like a command, questions included.</small></span></label>
+      <label class="opt"><input type="radio" name="act" value="none"><span><b>Nothing</b><small>Only transcribe.</small></span></label>
+    </fieldset>
+    <fieldset class="field">
+      <legend class="label">Speech-to-text model <span class="hint" id="f-lang"></span></legend>
+      <div id="f-models"></div>
+    </fieldset>
+    <div class="actions">
+      <button class="btn primary" type="submit" id="f-save">Save and apply</button>
+      <button class="btn" type="button" id="f-reset">Reset</button>
+      <span class="msg" id="admin-msg" role="status"></span>
+    </div>
+  </form>
+  <p class="hint">Saved to <code id="cfg-path"></code> and applied right away; a command in progress is dropped. The page has no login: anyone on your network can change these settings.</p>
+</div>
+
+<div class="lightbox" id="lightbox"><img alt="Photo"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const clock = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const day = ms => new Date(ms).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+const dur = s => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+                   return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+const STATE_COLOR = { idle: '--faint', starting: '--faint', listening: '--accent', thinking: '--warn', speaking: '--ok', error: '--err' };
+const PLAY = '<svg viewBox="0 0 12 12"><path d="M3 1.5v9l7.5-4.5z"/></svg>';
+const STOP = '<svg viewBox="0 0 12 12"><path d="M2.5 2.5h7v7h-7z"/></svg>';
+const photoUrl = n => '/api/photo/' + encodeURIComponent(n);
+
+let data = null, skew = 0;
+
+// "SetTimer { secs: 600, .. }" -> "Set timer"; questions and misses get plain names.
+function intentLabel(t) {
+  if (t.outcome === 'transcribed') return 'Transcript';
+  if (!t.intent) return '';
+  if (t.intent.startsWith('Unknown')) return t.actions.some(a => a.startsWith('Asked local LLM')) ? 'Question' : 'Not understood';
+  const name = t.intent.split(/[ ({]/)[0];
+  return name.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().replace(/^./, c => c.toUpperCase());
+}
+
+function playBtn(id, kind, label) {
+  return `<button class="play" type="button" data-src="/api/audio/${id}/${kind}.wav" title="${label}" aria-label="${label}">${PLAY}</button>`;
+}
+
+function turnHtml(t) {
+  const heard = t.heard ? `<div class="line you">${t.heard_audio ? playBtn(t.id, 'heard', 'Play recording') : ''}` +
+                          `<div class="bubble">${esc(t.heard)}</div></div>` : '';
+  const photo = t.photo ? `<img src="${photoUrl(t.photo)}" alt="Photo" loading="lazy" data-zoom>` : '';
+  let said = '';
+  if (t.said || photo) {
+    said = `<div class="line bot"><div class="bubble">${esc(t.said)}${photo}</div>` +
+           `${t.reply_audio ? playBtn(t.id, 'reply', 'Play reply') : ''}</div>`;
+  }
+  const TRIGGER = { timer: 'Timer finished', presence: 'Someone arrived' };
+  const system = TRIGGER[t.trigger] ? `<div class="system">${TRIGGER[t.trigger]}</div>` : '';
+  const outcome = !t.heard && t.outcome ? `<div class="system">${esc(t.outcome)}</div>` : '';
+  const pending = !t.heard && !t.said && !t.outcome && t.duration_ms == null ? '<div class="system">listening…</div>' : '';
+
+  const rows = [];
+  if (t.heard_engine) rows.push(['heard by', esc(t.heard_engine)]);
+  if (t.heard_alt) rows.push([esc(t.alt_engine || 'also'), `“${esc(t.heard_alt)}”`]);
+  if (t.intent) rows.push(['intent', `<span class="mono">${esc(t.intent)}</span>`]);
+  for (const a of t.actions) rows.push(['action', esc(a)]);
+  if (t.duration_ms != null) rows.push(['took', (t.duration_ms / 1000).toFixed(1) + ' s']);
+  const lat = Object.keys(STAGES).filter(k => t.latency?.[k] != null && k !== 'turn');
+  if (lat.length) rows.push(['latency', `<span class="lat-turn">${lat.map(k => `<span>${STAGES[k][0]} ${fmtMs(t.latency[k])}</span>`).join('')}</span>`]);
+  const label = intentLabel(t);
+  const foot = (label || rows.length)
+    ? `<div class="foot">${label ? `<span class="tag">${esc(label)}</span>` : ''}` +
+      (rows.length ? `<details><summary>details</summary><dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl></details>` : '') +
+      `</div>` : '';
+  return `<div class="meta"><span>${day(t.at)} · ${clock(t.at)}</span></div>${system}${heard}${said}${outcome}${pending}${foot}`;
+}
+
+function turnEl(t, el = document.createElement('div')) {
+  // keep an open "details" open across updates
+  const open = el.querySelector('details')?.open;
+  el.className = 'turn' + (!t.heard && !t.said && t.outcome ? ' ignored' : '');
+  el.innerHTML = turnHtml(t);
+  if (open) el.querySelector('details')?.setAttribute('open', '');
+  return el;
+}
+
+// Keyed rendering: only changed entries are redrawn.
+const shown = new Map();
+function renderFeed(turns) {
+  $('empty').hidden = turns.length > 0;
+  const keep = new Set(turns.map(t => t.id));
+  for (const [id, e] of shown) if (!keep.has(id)) { e.el.remove(); shown.delete(id); }
+  let prev = $('empty');
+  for (const t of turns) {
+    const key = JSON.stringify(t);
+    let e = shown.get(t.id);
+    if (!e) { e = { el: document.createElement('div'), key: '' }; shown.set(t.id, e); }
+    if (e.key !== key) { e.key = key; turnEl(t, e.el); }
+    if (prev.nextSibling !== e.el) prev.after(e.el);
+    prev = e.el;
+  }
+}
+
+// One shared player for all recordings.
+const player = new Audio();
+let playing = null;
+function stopPlaying() { player.pause(); playing?.classList.remove('on'); if (playing) playing.innerHTML = PLAY; playing = null; }
+player.addEventListener('ended', stopPlaying);
+document.addEventListener('click', e => {
+  const b = e.target.closest('.play');
+  if (b) {
+    const same = b === playing;
+    stopPlaying();
+    if (!same) { player.src = b.dataset.src; player.play(); playing = b; b.classList.add('on'); b.innerHTML = STOP; }
+    return;
+  }
+  const img = e.target.closest('img[data-zoom]');
+  if (img) { $('lightbox').querySelector('img').src = img.src; $('lightbox').classList.add('on'); }
+});
+$('lightbox').addEventListener('click', () => $('lightbox').classList.remove('on'));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') $('lightbox').classList.remove('on'); });
+
+$('show-ignored').addEventListener('change', e => document.body.classList.toggle('show-ignored', e.target.checked));
+
+$('more').addEventListener('click', async () => {
+  const b = $('more');
+  const ids = [...shown.keys(), ...[...$('older').children].map(el => +el.dataset.id)];
+  const before = ids.length ? Math.min(...ids) : '';
+  b.disabled = true;
+  try {
+    const turns = await (await fetch(`/api/history?before=${before}&limit=30`)).json();
+    for (const t of turns) { const el = turnEl(t); el.dataset.id = t.id; $('older').append(el); }
+    if (turns.length < 30) { b.textContent = 'That’s everything'; return; }
+    b.disabled = false;
+  } catch { b.disabled = false; }
+});
+
+let lastPhotos = null;
+function renderPhotos() {
+  $('camera-card').hidden = !data.info.camera;
+  const key = data.photos.join();
+  if (key === lastPhotos) return;
+  lastPhotos = key;
+  const [first, ...rest] = data.photos;
+  $('photos').innerHTML = first
+    ? `<img class="hero" src="${photoUrl(first)}" alt="Latest photo" data-zoom>` +
+      (rest.length ? `<div class="thumbs">${rest.slice(0, 4).map(n => `<img src="${photoUrl(n)}" alt="Photo" loading="lazy" data-zoom>`).join('')}</div>` : '')
+    : '<p class="hint">No photos yet. Say “take a picture”.</p>';
+}
+$('snap').addEventListener('click', async () => {
+  const b = $('snap');
+  b.disabled = true; b.textContent = 'Taking…';
+  try {
+    const r = await fetch('/api/photo', { method: 'POST' });
+    if (!r.ok) alert('Camera: ' + await r.text());
+  } finally { b.disabled = false; b.textContent = 'Take photo'; }
+});
+
+function renderTop() {
+  const s = data.state;
+  $('state').style.setProperty('--c', `var(${STATE_COLOR[s] || '--faint'})`);
+  $('state').classList.toggle('busy', ['listening', 'thinking', 'speaking'].includes(s));
+  $('state-text').textContent = s;
+  $('error').style.display = data.error ? 'block' : 'none';
+  $('error').textContent = data.error || '';
+  const live = $('live');
+  live.classList.toggle('on', s === 'listening');
+  if (s === 'listening') $('live-text').innerHTML = data.live ? `${esc(data.live)} <span>…</span>` : '<span>listening…</span>';
+  $('level').style.width = Math.round(data.level * 100) + '%';
+}
+
+function renderSide() {
+  const now = Date.now() + skew;
+  $('timers-card').hidden = !data.timers.length;
+  $('timers').innerHTML = data.timers.map(t => `<div class="timer"><span>${esc(t.name)}</span><b>${dur((t.due_ms - now) / 1000)}</b></div>`).join('');
+  const i = data.info;
+  const rows = [['wake word', `“${esc(i.wake_word)}”`], ['microphone', esc(i.capture_device)], ['speaker', esc(i.playback_device)],
+                ['local LLM', i.llm ? 'on' : 'off'], ['up', dur((data.now_ms - data.started_ms) / 1000)]];
+  const html = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  if ($('info').innerHTML !== html) $('info').innerHTML = html;
+}
+
+// ---------- pages ----------
+const PAGES = ['status', 'stats', 'info', 'admin'];
+let page = 'status';
+function showPage() {
+  const h = location.hash.slice(1);
+  page = PAGES.includes(h) ? h : h === 'latency' ? 'stats' : 'status';
+  for (const p of PAGES) $('page-' + p).hidden = p !== page;
+  for (const a of document.querySelectorAll('.nav a')) {
+    if (a.dataset.page === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  }
+  if (page === 'stats') loadStats();
+  if (page === 'info') loadInfo();
+  if (page === 'admin') loadAdmin();
+}
+window.addEventListener('hashchange', showPage);
+
+// ---------- latency ----------
+const STAGES = {
+  response: ['Response', 'end of speech → first sound'],
+  endpoint: ['End of speech', 'silence until the command is complete'],
+  stt: ['Speech to text', 'main engine transcription'],
+  intent: ['Intent', 'understanding the words'],
+  action: ['Command', 'running the skill'],
+  llm: ['LLM answer', 'local language model'],
+  camera: ['Photo', 'webcam snapshot'],
+  tts: ['Voice', 'synthesis until the first audio'],
+  turn: ['Whole turn', 'wake word → done, incl. speaking'],
+  wake: ['Wake detector', 'ms CPU per second of audio'],
+};
+// stacked groups: color slot follows the group, never its rank
+const GROUPS = [
+  ['endpoint', 'End of speech', '--s1', ['endpoint']],
+  ['stt', 'Speech to text', '--s2', ['stt']],
+  ['think', 'Thinking', '--s3', ['intent', 'action', 'llm', 'camera']],
+  ['tts', 'Voice', '--s4', ['tts']],
+];
+const STAGE_COLOR = { endpoint: '--s1', stt: '--s2', intent: '--s3', action: '--s3', llm: '--s3', camera: '--s3', tts: '--s4' };
+const fmtMs = ms => ms == null ? '–' : ms === 0 ? '0' : ms < 1 ? ms.toFixed(2) + ' ms' : ms < 1000 ? Math.round(ms) + ' ms' : (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + ' s';
+const pct = (sorted, q) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] : null;
+const NS = 'http://www.w3.org/2000/svg';
+
+let hours = 24, stats = [], selected = 'response';
+
+document.querySelectorAll('#range button').forEach(b => b.addEventListener('click', () => {
+  hours = +b.dataset.h;
+  document.querySelectorAll('#range button').forEach(x => x.setAttribute('aria-pressed', x === b));
+  loadStats();
+}));
+
+async function loadStats() {
+  try {
+    stats = await (await fetch(`/api/stats?hours=${hours}`, { cache: 'no-store' })).json();
+    renderLatency();
+  } catch {}
+}
+
+function byStage() {
+  const m = {};
+  for (const [at, stage, ms, turn] of stats) (m[stage] ||= []).push({ at, ms, turn });
+  return m;
+}
+
+function renderLatency() {
+  const m = byStage();
+  const sorted = k => (m[k] || []).map(x => x.ms).sort((a, b) => a - b);
+  const r = sorted('response');
+  $('resp-med').textContent = fmtMs(pct(r, 0.5));
+  $('resp-sub').textContent = r.length
+    ? `median response · p95 ${fmtMs(pct(r, 0.95))} · ${r.length} answers · from the end of what you said until the answer starts`
+    : 'no answers in this period yet';
+  if (!m[selected]) selected = Object.keys(STAGES).find(k => m[k]) || 'response';
+  $('tiles').innerHTML = Object.entries(STAGES).filter(([k]) => m[k]).map(([k, [name, hint]]) => {
+    const v = sorted(k);
+    return `<button class="tile" type="button" data-stage="${k}" aria-pressed="${k === selected}" title="${esc(hint)}">` +
+      `<div class="k"><i style="--c: var(${STAGE_COLOR[k] || '--faint'})"></i>${esc(name)}</div>` +
+      `<div class="v">${fmtMs(pct(v, 0.5))}</div><div class="s">p95 ${fmtMs(pct(v, 0.95))} · n ${v.length}</div></button>`;
+  }).join('') || '<p class="hint">No measurements in this period yet. Say something to the assistant.</p>';
+  renderStack(m);
+  renderSeries(m[selected] || []);
+}
+$('tiles').addEventListener('click', e => {
+  const t = e.target.closest('.tile');
+  if (t) { selected = t.dataset.stage; renderLatency(); }
+});
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  parent?.appendChild(e);
+  return e;
+}
+
+const tip = $('tip');
+function showTip(evt, html) {
+  tip.innerHTML = html;
+  tip.style.display = 'block';
+  const box = $('latency-view').getBoundingClientRect();
+  let x = evt.clientX - box.left + 12, y = evt.clientY - box.top + 12;
+  if (x + tip.offsetWidth > box.width) x = evt.clientX - box.left - tip.offsetWidth - 12;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+const hideTip = () => { tip.style.display = 'none'; };
+
+function niceMax(v) {
+  if (!(v > 0)) return 1;
+  const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * p;
+}
+
+function renderStack(m) {
+  // one row per turn that has a response time
+  const turns = new Map();
+  for (const [at, stage, ms, turn] of stats) {
+    if (turn == null) continue;
+    const t = turns.get(turn) || { turn, at, v: {} };
+    t.v[stage] = ms;
+    turns.set(turn, t);
+  }
+  const rows = [...turns.values()].filter(t => t.v.response != null).sort((a, b) => b.turn - a.turn).slice(0, 30);
+  $('stack-chart').hidden = !rows.length;
+  if (!rows.length) return;
+  $('stack-legend').innerHTML = GROUPS.map(([, name, c]) => `<span><i style="--c: var(${c})"></i>${name}</span>`).join('');
+  const sum = (t, keys) => keys.reduce((a, k) => a + (t.v[k] || 0), 0);
+  const svg = $('stack');
+  svg.replaceChildren();
+  const W = svg.clientWidth || 600, rowH = 20, barH = 12, left = 48, right = 64, top = 4;
+  const H = top + rows.length * rowH + 20;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('height', H);
+  const max = niceMax(Math.max(...rows.map(t => Math.max(t.v.response, GROUPS.reduce((a, g) => a + sum(t, g[3]), 0)))));
+  const x = v => left + v / max * (W - left - right);
+  for (let i = 0; i <= 4; i++) {
+    const v = max * i / 4;
+    el('line', { x1: x(v), x2: x(v), y1: top, y2: H - 18, stroke: 'var(--grid)' }, svg);
+    el('text', { x: x(v), y: H - 4, 'text-anchor': 'middle' }, svg).textContent = fmtMs(v);
+  }
+  rows.forEach((t, i) => {
+    const y = top + i * rowH + (rowH - barH) / 2;
+    el('text', { x: left - 8, y: y + barH - 2, 'text-anchor': 'end' }, svg).textContent = clock(t.at);
+    let acc = 0;
+    const segs = GROUPS.map(g => [g, sum(t, g[3])]).filter(([, v]) => v > 0);
+    segs.forEach(([g, v], j) => {
+      const x0 = x(acc), w = Math.max(1, x(acc + v) - x0);
+      const last = j === segs.length - 1;
+      // 4px rounded end on the last segment only, 2px surface gap between segments
+      const path = last && w > 4
+        ? `M${x0},${y}h${w - 4}a4,4 0 0 1 4,4v${barH - 8}a4,4 0 0 1 -4,4h${-(w - 4)}z`
+        : `M${x0},${y}h${w}v${barH}h${-w}z`;
+      el('path', { d: path, fill: `var(${g[2]})`, stroke: 'var(--surface)', 'stroke-width': 2, 'paint-order': 'stroke' }, svg);
+      acc += v;
+    });
+    el('text', { x: x(acc) + 6, y: y + barH - 2 }, svg).textContent = fmtMs(t.v.response);
+    const hit = el('rect', { x: 0, y: top + i * rowH, width: W, height: rowH, fill: 'transparent' }, svg);
+    hit.addEventListener('mousemove', e => showTip(e,
+      `<b>${clock(t.at)}</b> · response ${fmtMs(t.v.response)}` +
+      GROUPS.map(g => `<div class="r"><span><i style="--c: var(${g[2]})"></i>${g[1]}</span><span>${fmtMs(sum(t, g[3]) || null)}</span></div>`).join('') +
+      (t.v.llm ? `<div class="r"><span>of which LLM</span><span>${fmtMs(t.v.llm)}</span></div>` : '')));
+    hit.addEventListener('mouseleave', hideTip);
+  });
+  $('stack-table').innerHTML = `<table class="data"><tr><th>time</th>${GROUPS.map(g => `<th>${g[1]}</th>`).join('')}<th>response</th></tr>` +
+    rows.map(t => `<tr><td>${day(t.at)} ${clock(t.at)}</td>${GROUPS.map(g => `<td>${fmtMs(sum(t, g[3]) || null)}</td>`).join('')}<td>${fmtMs(t.v.response)}</td></tr>`).join('') + '</table>';
+}
+
+function renderSeries(pts) {
+  const [name, hint] = STAGES[selected] || [selected, ''];
+  $('series-title').textContent = name + ' over time';
+  $('series-sub').textContent = `${hint}. Every measurement; the dashed line is the median. Pick a stage above.`;
+  const svg = $('series');
+  svg.replaceChildren();
+  const W = svg.clientWidth || 600, H = 200, left = 56, right = 12, top = 10, bottom = 22;
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('height', H);
+  const now = Date.now() + skew, t0 = now - hours * 3600e3;
+  const vals = pts.map(p => p.ms).sort((a, b) => a - b);
+  const max = niceMax(Math.max(pct(vals, 0.98) || 0, pct(vals, 0.5) * 1.5 || 0));
+  const x = t => left + (t - t0) / (now - t0) * (W - left - right);
+  const y = v => H - bottom - Math.min(v, max) / max * (H - top - bottom);
+  for (let i = 0; i <= 3; i++) {
+    const v = max * i / 3;
+    el('line', { x1: left, x2: W - right, y1: y(v), y2: y(v), stroke: 'var(--grid)' }, svg);
+    el('text', { x: left - 8, y: y(v) + 4, 'text-anchor': 'end' }, svg).textContent = fmtMs(v);
+  }
+  for (let i = 0; i <= 4; i++) {
+    const t = t0 + (now - t0) * i / 4;
+    el('text', { x: x(t), y: H - 4, 'text-anchor': i === 0 ? 'start' : i === 4 ? 'end' : 'middle' }, svg)
+      .textContent = hours > 24 ? day(t) : clock(t);
+  }
+  if (!pts.length) return;
+  const med = pct(vals, 0.5);
+  el('line', { x1: left, x2: W - right, y1: y(med), y2: y(med), stroke: 'var(--text)', 'stroke-dasharray': '4 4', 'stroke-width': 1, opacity: .5 }, svg);
+  el('text', { x: W - right, y: y(med) - 5, 'text-anchor': 'end' }, svg).textContent = 'median ' + fmtMs(med);
+  const color = `var(${STAGE_COLOR[selected] || '--s1'})`;
+  const dots = pts.map(p => el('circle', { cx: x(p.at), cy: y(p.ms), r: 4, fill: color, stroke: 'var(--surface)', 'stroke-width': 2 }, svg));
+  // hover: nearest point by x
+  const hit = el('rect', { x: left, y: top, width: W - left - right, height: H - top - bottom, fill: 'transparent' }, svg);
+  let hot = null;
+  hit.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect(), mx = (e.clientX - r.left) * W / r.width;
+    let best = 0;
+    pts.forEach((p, i) => { if (Math.abs(x(p.at) - mx) < Math.abs(x(pts[best].at) - mx)) best = i; });
+    hot?.setAttribute('r', 4);
+    hot = dots[best]; hot.setAttribute('r', 6);
+    const p = pts[best];
+    showTip(e, `<b>${fmtMs(p.ms)}</b>${p.ms > max ? ' (off the chart)' : ''}<br>${day(p.at)} ${new Date(p.at).toLocaleTimeString()}`);
+  });
+  hit.addEventListener('mouseleave', () => { hot?.setAttribute('r', 4); hot = null; hideTip(); });
+}
+window.addEventListener('resize', () => { if (page === 'stats') renderLatency(); });
+
+// ---------- listening mode ----------
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', async () => {
+  await fetch(`/api/mode?continuous=${b.dataset.mode}`, { method: 'POST' });
+}));
+function renderMode() {
+  for (const b of document.querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', (b.dataset.mode === '1') === data.continuous);
+  $('mode-hint').textContent = data.continuous
+    ? 'Transcribing everything that is said.'
+    : `Say “${data.info.wake_word}”, then a command.`;
+}
+
+// ---------- info ----------
+const fmtBytes = b => b == null ? '–' : b < 1024 ** 2 ? Math.round(b / 1024) + ' KB'
+  : b < 1024 ** 3 ? (b / 1024 ** 2).toFixed(b < 10 * 1024 ** 2 ? 1 : 0) + ' MB' : (b / 1024 ** 3).toFixed(2) + ' GB';
+const kib = k => k == null ? null : k * 1024;
+const longDur = s => s >= 86400 ? Math.floor(s / 86400) + ' d ' + dur(s % 86400) : dur(s);
+const code = s => s ? `<code>${esc(s)}</code>` : null;
+const chips = a => a?.length ? `<span class="chips">${a.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</span>` : null;
+const good = t => `<span class="good">${t}</span>`, bad = t => `<span class="bad">${t}</span>`;
+const modelHtml = m => m ? `${esc(m.name)} <span class="hint">${fmtBytes(m.bytes)}</span>${m.exists === false ? ' ' + bad('missing') : ''}<br>${code(m.path)}` : null;
+const meter = (used, total) => total ? `${fmtBytes(kib(used))} of ${fmtBytes(kib(total))}` +
+  `<div class="bar" role="img" aria-label="${Math.round(used / total * 100)} percent used"><i style="width:${Math.round(used / total * 100)}%"></i></div>` : null;
+function card(title, rows) {
+  const body = rows.filter(r => r[1] != null && r[1] !== '').map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  return `<section class="card"><div class="card-head"><h2>${title}</h2></div><dl class="kv">${body}</dl></section>`;
+}
+
+let infoTimer = null;
+async function loadInfo() {
+  clearTimeout(infoTimer);
+  if (page !== 'info') return;
+  try {
+    renderInfo(await (await fetch('/api/info', { cache: 'no-store' })).json());
+    $('info-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+  } catch { $('info-updated').textContent = 'offline'; }
+  infoTimer = setTimeout(loadInfo, 5000);
+}
+
+function renderInfo(v) {
+  const b = v.build || {}, s = v.system || {}, st = v.stt || {}, m = st.main || {}, db = v.database || {};
+  const l = v.llm || {}, srv = l.server || {}, p = s.process || {}, u = s.usb || {}, w = v.wake || {};
+  const html = [
+    card('Software', [
+      ['version', esc(b.version)],
+      ['built', b.built_ms ? `${day(b.built_ms)} ${clock(b.built_ms)} on ${esc(b.built_on)}` : null],
+      ['target', b.target ? `${code(b.target)} · ${esc(b.profile)}` : null],
+      ['compiler', esc(b.rustc)],
+      ['features', chips(b.features)],
+      ['libraries', chips(Object.entries(b.crates || {}).map(([k, x]) => `${k} ${x}`))],
+      ['SQLite', esc(b.sqlite)],
+      ['binary', b.binary ? `${code(b.binary)} · ${fmtBytes(b.binary_bytes)}` : null],
+      ['config', code(v.config_path)],
+      ['running since', data ? `${day(data.started_ms)} ${clock(data.started_ms)}` : null],
+    ]),
+    card('Speech', [
+      ['language', esc(v.language)],
+      ['wake word', `“${esc(w.word)}” · ${esc(w.engine)}${w.verify ? ', verified' : ''}`],
+      ['mode', esc(w.mode) + (w.mode === 'continuous' ? ` · acts on ${esc(w.continuous_act)}` : '')],
+      ['speech to text', [m.engine, m.runtime, m.arch].filter(Boolean).map(esc).join(' · ')],
+      ['model', modelHtml(m.model)],
+      ['library', code(m.library)],
+      ['command grammar', st.grammar ? (st.grammar.enabled ? 'Vosk grammar' : 'off') : null],
+      ['Vosk model', modelHtml(st.grammar?.model)],
+      ['end of speech', st.end_silence_secs != null ? `${st.end_silence_secs} s without new words` : null],
+      ['recordings', st.record_dir ? code(st.record_dir) : 'off'],
+    ]),
+    card('Voice and LLM', [
+      ['text to speech', [v.tts?.engine, v.tts?.piper_version].filter(Boolean).map(esc).join(' ')],
+      ['voice', modelHtml(v.tts?.voice)],
+      ['LLM', l.enabled ? (srv.running ? good('running') : bad('not reachable')) : 'off'],
+      ['LLM model', srv.model ? `${esc(String(srv.model).split('/').pop())} · ${esc(srv.quantization)}` : null],
+      ['llama.cpp', srv.build ? `build ${esc(srv.build)}` : null],
+      ['context', srv.context ? `${srv.context} tokens · ${srv.slots} slots` : null],
+      ['endpoint', l.enabled ? code(l.url) : null],
+    ]),
+    card('Devices', [
+      ['microphone', code(v.audio?.capture)],
+      ['speaker', code(v.audio?.playback)],
+      ['volume control', esc(v.audio?.mixer)],
+      ['camera', v.camera ? (v.camera.enabled ? `${code(v.camera.device)}${v.camera.presence ? ' · presence detection' : ''}` : 'off') : null],
+      ['USB-C port', u.role ? (u.role === 'host' ? 'host' : bad('device mode: hub and webcam are not powered')) : null],
+      ['USB devices', u.devices ? (u.devices.length ? u.devices.map(esc).join('<br>') : bad('none')) : null],
+    ]),
+    card('Database', db.path ? [
+      ['file', code(db.path)],
+      ['size', fmtBytes(db.bytes)],
+      ['schema', db.schema_version != null ? `v${db.schema_version}` + (db.schema_version === db.schema_latest ? ' (current)' : ` of ${db.schema_latest}`) : null],
+      ['turns', db.turns],
+      ['with audio', db.turns_with_audio != null ? `${db.turns_with_audio} (keeps the last ${db.keep_audio})` : null],
+      ['latency samples', db.latency_samples],
+    ] : [['history', 'off']]),
+    card('Board', [
+      ['board', esc(s.board)],
+      ['system', esc(s.os)],
+      ['kernel', esc(s.kernel)],
+      ['host name', esc(s.hostname)],
+      ['CPU', s.cpus ? `${s.cpus} cores · load ${esc(s.load)}` : null],
+      ['memory', meter(s.mem_total_kb - s.mem_available_kb, s.mem_total_kb)],
+      ['disk (home)', s.disk_total_kb ? meter(s.disk_total_kb - s.disk_free_kb, s.disk_total_kb) : null],
+      ['temperature', s.temp_c != null ? s.temp_c.toFixed(1) + ' °C' : null],
+      ['up', s.uptime_s != null ? longDur(s.uptime_s) : null],
+      ['assistant', p.pid ? `pid ${p.pid} · ${fmtBytes(kib(p.rss_kb))} RAM · ${p.threads} threads` : null],
+    ]),
+  ].join('');
+  if ($('info-grid').innerHTML !== html) $('info-grid').innerHTML = html;
+}
+
+// ---------- admin ----------
+let admin = null;
+// measured on the UNO Q with ~3 s commands
+function modelNote(m) {
+  if (m.runtime === 'sherpa-onnx') return 'fastest, about 1 s per command; less accurate in noise';
+  if (m.size === 'tiny' && m.streaming) return 'about 1.5–2 s per command; weak in noise';
+  if (m.size === 'small') return 'most accurate; about 4–5 s per command';
+  if (m.size === 'medium') return 'too slow for this board';
+  return 'slow on this board';
+}
+async function loadAdmin(force) {
+  if (admin && !force) return; // keep unsaved edits
+  try {
+    admin = await (await fetch('/api/admin', { cache: 'no-store' })).json();
+    fillAdmin();
+  } catch { $('admin-msg').textContent = 'offline'; }
+}
+function check(name, value) {
+  for (const i of $('admin-form').querySelectorAll(`input[name="${name}"]`)) i.checked = i.value === value;
+}
+function fillAdmin() {
+  const s = admin.settings || {};
+  $('f-wake').value = s.wake_word || '';
+  check('mode', s.mode);
+  check('act', s.continuous_act);
+  $('f-lang').textContent = admin.language === 'de' ? '· German' : '· English';
+  const models = [...(admin.models || [])];
+  if (s.moonshine_dir && !models.some(m => m.path === s.moonshine_dir)) {
+    models.unshift({ path: s.moonshine_dir, name: s.moonshine_dir.split('/').pop(), size: 'configured', runtime: '', bytes: null });
+  }
+  $('f-models').innerHTML = models.map(m =>
+    `<label class="opt"><input type="radio" name="model" value="${esc(m.path)}">` +
+    `<span><b>${esc(m.size)}${m.streaming ? ' streaming' : ''}</b>` +
+    `<small>${m.runtime === 'moonshine-voice' ? 'new Moonshine runtime' : esc(m.runtime)}${m.runtime ? ' · ' : ''}${modelNote(m)}</small></span>` +
+    `<span class="meta-r">${fmtBytes(m.bytes)}</span></label>`).join('') || '<p class="hint">No Moonshine models found.</p>';
+  check('model', s.moonshine_dir);
+  $('cfg-path').textContent = admin.config_path;
+}
+$('admin-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const f = e.target, msg = $('admin-msg'), old = admin?.settings || {};
+  const sel = n => f.querySelector(`input[name="${n}"]:checked`)?.value;
+  const body = {
+    wake_word: $('f-wake').value.trim(),
+    mode: sel('mode') || old.mode,
+    continuous_act: sel('act') || old.continuous_act,
+    moonshine_dir: sel('model') || old.moonshine_dir,
+  };
+  const heavy = body.wake_word !== old.wake_word || body.moonshine_dir !== old.moonshine_dir;
+  $('f-save').disabled = true;
+  msg.className = 'msg';
+  msg.textContent = heavy ? 'Applying… loading the speech model takes a few seconds' : 'Saving…';
+  try {
+    const r = await fetch('/api/admin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error(await r.text());
+    const res = await r.json();
+    await loadAdmin(true);
+    msg.className = res.warning ? 'msg err' : 'msg ok';
+    msg.textContent = res.warning ? 'Saved, but ' + res.warning + '.'
+      : `Saved and applied. Speech to text: ${res.engine?.model?.name || res.engine?.engine}.`;
+  } catch (err) {
+    msg.className = 'msg err';
+    msg.textContent = err.message || 'failed';
+  } finally {
+    $('f-save').disabled = false;
+  }
+});
+$('f-reset').addEventListener('click', () => { if (admin) fillAdmin(); $('admin-msg').textContent = ''; });
+
+showPage();
+
+let lastTurns = '';
+async function poll() {
+  try {
+    data = await (await fetch('/api/status', { cache: 'no-store' })).json();
+    skew = data.now_ms - Date.now();
+    renderTop();
+    const key = JSON.stringify(data.turns);
+    if (key !== lastTurns) {
+      const first = !lastTurns;
+      lastTurns = key; renderFeed(data.turns);
+      if (!first && page === 'stats') loadStats();
+    }
+    renderMode();
+    renderPhotos();
+    renderSide();
+  } catch {
+    $('state').style.setProperty('--c', 'var(--err)');
+    $('state-text').textContent = 'offline';
+  }
+  setTimeout(poll, 500);
+}
+poll();
+</script>
+</body>
+</html>

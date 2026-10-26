@@ -1,0 +1,49 @@
+[package]
+name = "uno-assistant"
+version = "0.1.0"
+edition = "2024"
+description = "Offline voice assistant (wake word 'computer') for the Arduino UNO Q"
+
+[features]
+# whisper is not in the default build: whisper.cpp and the prebuilt sherpa-onnx (moonshine)
+# both carry their own libstdc++ template code (std::regex); linked together the binary
+# can crash at random, depending on which copy the linker picks. Build it on its own:
+#   cargo build --release --no-default-features --features llm,whisper
+default = ["llm", "moonshine", "moonshine-voice", "candle"]
+# Fallback to a local llama.cpp server for questions the built-in skills don't cover.
+llm = ["dep:ureq"]
+# Moonshine speech-to-text (sherpa-onnx, statically linked) for open questions.
+moonshine = ["dep:sherpa-onnx"]
+# Moonshine via the official moonshine-voice library (English + German streaming models),
+# loaded at run time: no build-time dependency.
+moonshine-voice = ["dep:libloading"]
+# Whisper speech-to-text (whisper.cpp, built from source with cmake) for open questions.
+whisper = ["dep:whisper-rs"]
+# Whisper in pure Rust with candle-transformers (no C++ build), for open questions.
+candle = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers", "dep:tokenizers"]
+
+[dependencies]
+anyhow = "1.0.104"
+candle-core = { version = "0.11.0", optional = true }
+candle-nn = { version = "0.11.0", optional = true }
+candle-transformers = { version = "0.11.0", optional = true }
+chrono = "0.4.45"
+env_logger = "0.11.11"
+libloading = { version = "0.8", optional = true }
+log = "0.4.34"
+rusqlite = { version = "0.41.0", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sherpa-onnx = { version = "2.0.0", optional = true }
+tokenizers = { version = "0.22.2", default-features = false, features = ["onig"], optional = true }
+toml = "1.1.8"
+toml_edit = "0.25.17"
+# localhost only, so no TLS stack needed
+ureq = { version = "3.5.0", default-features = false, features = ["json"], optional = true }
+vosk = "0.3.1"
+whisper-rs = { version = "0.16.0", optional = true }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
